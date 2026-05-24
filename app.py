@@ -678,6 +678,48 @@ st.markdown(
 # === NEW FEATURE END ===
 
 
+# === AI FEATURE START ===
+# Smart Recommendation System
+st.markdown("---")
+st.subheader("💡 Smart Recommendation System")
+
+# Determine recommendation based on duty cycle
+if duty_cycle < 30:
+    st.info(
+        """🟢 **Energy Saving Mode**
+        
+        Your PWM is set to a low duty cycle. This is ideal for:
+        - Battery-powered applications
+        - Reducing heat generation
+        - Extending device lifespan
+        - Energy-efficient operation
+        """
+    )
+elif 30 <= duty_cycle <= 70:
+    st.info(
+        """🟡 **Balanced Performance**
+        
+        Your PWM is in the optimal range for:
+        - Smooth motor operation
+        - Reliable LED brightness control
+        - Balanced power consumption
+        - Safe long-term operation
+        """
+    )
+else:  # duty_cycle > 70
+    st.warning(
+        """🔴 **High Power Mode**
+        
+        Your PWM is set to high power. Be aware:
+        - Increased power consumption
+        - Heat generation may increase
+        - Ensure adequate cooling/ventilation
+        - Consider reducing duty cycle for sustained use
+        """
+    )
+# === AI FEATURE END ===
+
+
 # ============================================================================
 # INTERACTIVE INFO SECTION
 # ============================================================================
@@ -832,3 +874,46 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
+
+# === AI FEATURE START ===
+# AI Chat Assistant
+st.markdown("---")
+st.subheader("🤖 AI Chat Assistant")
+
+# Knowledge base for PWM-related questions
+pwm_knowledge_base = {
+    "what is pwm": "PWM (Pulse Width Modulation) is a technique that encodes information in the duty cycle of a square wave. It's used to control average power delivery by varying the ratio of ON time to total cycle time. PWM is efficient, simple to implement, and fundamental in electronics.",
+    "what is duty cycle": "Duty cycle is the percentage of time a signal is HIGH (active) compared to its total period. A 50% duty cycle means the signal is ON half the time and OFF half the time. It directly controls the average power delivered to a device.",
+    "why use pwm": "PWM is used because it's highly efficient, simple to implement with digital circuits, and allows smooth analog-like control from digital signals. It minimizes wasted energy as heat and is perfect for controlling power, brightness, and speed.",
+    "applications of pwm": "PWM is used in: LED brightness control, motor speed regulation, power supply regulation, switch-mode power supplies, audio amplifiers, heating control systems, and many other embedded applications.",
+    "how to increase motor speed": "To increase motor speed, increase the duty cycle. Higher duty cycle means more average power is delivered to the motor, resulting in faster rotation. You can use the duty cycle slider to adjust speed smoothly.",
+    "how to dim led": "To dim an LED, decrease the duty cycle. Lower duty cycle reduces the average brightness of the LED. At 0%, the LED is OFF; at 100%, it's at full brightness.",
+    "what is frequency": "Frequency is the number of complete PWM cycles per second, measured in Hertz (Hz). Higher frequency (faster switching) provides smoother control and reduces audible noise, especially important for motor and buzzer applications.",
+    "preset modes": "The dashboard offers three preset modes: Eco (25% duty cycle) for energy savings, Normal (50% duty cycle) for balanced operation, and Performance (85% duty cycle) for maximum power output.",
+}
+
+user_question = st.text_input(
+    "💬 Ask me about PWM:",
+    placeholder="e.g., 'What is PWM?', 'How to increase motor speed?'"
+)
+
+if user_question:
+    # Convert to lowercase for matching
+    question_lower = user_question.lower()
+    
+    # Simple keyword matching
+    answer_found = False
+    for key, answer in pwm_knowledge_base.items():
+        if key in question_lower:
+            st.success(f"**🤖 AI Assistant:** {answer}")
+            answer_found = True
+            break
+    
+    if not answer_found:
+        st.info(
+            "**🤖 AI Assistant:** I'm not sure about that specific question. "
+            "Try asking about: PWM, duty cycle, frequency, motor speed, LED brightness, "
+            "or applications of PWM."
+        )
+# === AI FEATURE END ===
