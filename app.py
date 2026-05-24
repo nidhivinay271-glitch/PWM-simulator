@@ -877,43 +877,174 @@ st.markdown(
 
 
 # === AI FEATURE START ===
-# AI Chat Assistant
+# === AI CHAT UPGRADE START ===
+# Enhanced AI Chat Assistant with intelligent keyword-based responses
 st.markdown("---")
 st.subheader("🤖 AI Chat Assistant")
 
-# Knowledge base for PWM-related questions
-pwm_knowledge_base = {
-    "what is pwm": "PWM (Pulse Width Modulation) is a technique that encodes information in the duty cycle of a square wave. It's used to control average power delivery by varying the ratio of ON time to total cycle time. PWM is efficient, simple to implement, and fundamental in electronics.",
-    "what is duty cycle": "Duty cycle is the percentage of time a signal is HIGH (active) compared to its total period. A 50% duty cycle means the signal is ON half the time and OFF half the time. It directly controls the average power delivered to a device.",
-    "why use pwm": "PWM is used because it's highly efficient, simple to implement with digital circuits, and allows smooth analog-like control from digital signals. It minimizes wasted energy as heat and is perfect for controlling power, brightness, and speed.",
-    "applications of pwm": "PWM is used in: LED brightness control, motor speed regulation, power supply regulation, switch-mode power supplies, audio amplifiers, heating control systems, and many other embedded applications.",
-    "how to increase motor speed": "To increase motor speed, increase the duty cycle. Higher duty cycle means more average power is delivered to the motor, resulting in faster rotation. You can use the duty cycle slider to adjust speed smoothly.",
-    "how to dim led": "To dim an LED, decrease the duty cycle. Lower duty cycle reduces the average brightness of the LED. At 0%, the LED is OFF; at 100%, it's at full brightness.",
-    "what is frequency": "Frequency is the number of complete PWM cycles per second, measured in Hertz (Hz). Higher frequency (faster switching) provides smoother control and reduces audible noise, especially important for motor and buzzer applications.",
-    "preset modes": "The dashboard offers three preset modes: Eco (25% duty cycle) for energy savings, Normal (50% duty cycle) for balanced operation, and Performance (85% duty cycle) for maximum power output.",
-}
-
 user_question = st.text_input(
     "💬 Ask me about PWM:",
-    placeholder="e.g., 'What is PWM?', 'How to increase motor speed?'"
+    placeholder="e.g., 'What is PWM?', 'How does LED work?', 'Tell me about motor'"
 )
 
 if user_question:
-    # Convert to lowercase for matching
     question_lower = user_question.lower()
+    response = None
     
-    # Simple keyword matching
-    answer_found = False
-    for key, answer in pwm_knowledge_base.items():
-        if key in question_lower:
-            st.success(f"**🤖 AI Assistant:** {answer}")
-            answer_found = True
-            break
-    
-    if not answer_found:
-        st.info(
-            "**🤖 AI Assistant:** I'm not sure about that specific question. "
-            "Try asking about: PWM, duty cycle, frequency, motor speed, LED brightness, "
-            "or applications of PWM."
+    # === PWM CONCEPTS ===
+    if any(word in question_lower for word in ["what is pwm", "pwm", "what does pwm mean"]):
+        response = (
+            "**PWM (Pulse Width Modulation)** is a technique that controls average power by varying how long a signal "
+            "stays ON vs OFF in each cycle. Instead of changing voltage, PWM switches the signal rapidly HIGH and LOW. "
+            "The ratio of ON-time to total cycle-time is called the **duty cycle**. Higher duty cycle = more power. "
+            "This is used in your dashboard to control LED brightness, motor speed, buzzer intensity, and heater heat."
         )
+    
+    elif any(word in question_lower for word in ["duty cycle", "duty", "what is duty"]):
+        response = (
+            "**Duty cycle** is the percentage of time the PWM signal is HIGH (ON) within one complete cycle. "
+            "For example:\n"
+            "- **0% duty cycle** = Signal always OFF (no power)\n"
+            "- **50% duty cycle** = Signal ON half the time, OFF half the time\n"
+            "- **100% duty cycle** = Signal always ON (full power)\n"
+            "Duty cycle directly controls the **average power** delivered to your device. Use the duty cycle slider "
+            "on the left to see how it affects LED brightness, motor speed, and other outputs!"
+        )
+    
+    elif any(word in question_lower for word in ["frequency", "what is frequency", "hz"]):
+        response = (
+            "**Frequency** is how many complete PWM cycles happen per second, measured in **Hertz (Hz)**. "
+            "For example, 1000 Hz = 1000 cycles per second.\n\n"
+            "**Why frequency matters:**\n"
+            "- **Higher frequency** = Smoother operation, less audible noise (better for motors & buzzers)\n"
+            "- **Lower frequency** = Can cause flickering in LEDs or audible buzz\n"
+            "Adjust the frequency slider to see how it affects the waveform smoothness and device response!"
+        )
+    
+    elif any(word in question_lower for word in ["why pwm", "why use", "advantage", "benefit"]):
+        response = (
+            "**Why PWM is so useful:**\n"
+            "✓ **Energy efficient** - No wasted power as heat (unlike resistors)\n"
+            "✓ **Simple control** - Easy to control with digital signals\n"
+            "✓ **Smooth output** - Simulates analog behavior from digital circuits\n"
+            "✓ **Versatile** - Works for LEDs, motors, heaters, buzzers, and power supplies\n"
+            "✓ **Cost-effective** - Requires minimal hardware\n"
+            "PWM is the industry standard for power control in embedded systems!"
+        )
+    
+    # === DEVICES ===
+    elif any(word in question_lower for word in ["led", "light", "brightness"]):
+        response = (
+            "**LED Control with PWM:**\n"
+            "The LED's brightness is controlled by the duty cycle:\n"
+            "- **0%** = LED OFF (no brightness)\n"
+            "- **50%** = LED at half brightness\n"
+            "- **100%** = LED at full brightness\n\n"
+            "Your eyes perceive the rapidly flickering light (at high frequency) as continuous brightness. "
+            "The higher the duty cycle, the brighter the LED appears! Try adjusting the duty cycle slider "
+            "and selecting 'LED' from the device dropdown to see the effect."
+        )
+    
+    elif any(word in question_lower for word in ["motor", "speed", "rotation"]):
+        response = (
+            "**Motor Speed Control with PWM:**\n"
+            "Motor speed is controlled by the duty cycle:\n"
+            "- **0%** = Motor OFF\n"
+            "- **Low duty cycle (1-33%)** = Slow rotation\n"
+            "- **Medium duty cycle (34-66%)** = Medium speed\n"
+            "- **High duty cycle (67-100%)** = Maximum speed\n\n"
+            "Higher duty cycle delivers more average power to the motor, making it rotate faster. "
+            "Select 'Motor' from the device dropdown to see the animated gear speed change with duty cycle!"
+        )
+    
+    elif any(word in question_lower for word in ["buzzer", "sound", "beep", "noise"]):
+        response = (
+            "**Buzzer Sound Control with PWM:**\n"
+            "PWM controls the buzzer's sound intensity:\n"
+            "- **0%** = Silent (no sound)\n"
+            "- **Low duty cycle (1-49%)** = Low sound level\n"
+            "- **High duty cycle (50-100%)** = Loud sound\n\n"
+            "The frequency slider also affects the buzzer tone. Higher frequencies produce higher-pitched sounds. "
+            "Select 'Buzzer' from the device dropdown to visualize the sound level with animated waveforms!"
+        )
+    
+    elif any(word in question_lower for word in ["heater", "heat", "temperature", "warm", "hot"]):
+        response = (
+            "**Heater Temperature Control with PWM:**\n"
+            "PWM controls heating intensity:\n"
+            "- **0%** = Heater OFF\n"
+            "- **Low duty cycle (1-49%)** = Warm (low heat)\n"
+            "- **High duty cycle (50-100%)** = Hot (high heat)\n\n"
+            "Higher duty cycle means the heater is ON longer, generating more heat. "
+            "Select 'Heater' from the device dropdown to see the animated heat bars showing temperature rise!"
+        )
+    
+    # === PROJECT-RELATED ===
+    elif any(word in question_lower for word in ["dashboard", "what does this", "how does this work", "project"]):
+        response = (
+            "**Welcome to the PWM Signal Simulator Dashboard!** 📊\n\n"
+            "This interactive tool lets you:\n"
+            "✓ Adjust duty cycle and frequency with sliders\n"
+            "✓ See the PWM waveform change in real-time\n"
+            "✓ Observe how duty cycle affects LED brightness, motor speed, buzzer sound, and heater heat\n"
+            "✓ Compare two different PWM settings side-by-side\n"
+            "✓ Use preset modes (Eco, Normal, Performance) for quick setup\n"
+            "✓ Get smart recommendations based on your settings\n\n"
+            "Start by adjusting the duty cycle slider and selecting different devices to see PWM in action!"
+        )
+    
+    elif any(word in question_lower for word in ["graph", "waveform", "plot", "signal"]):
+        response = (
+            "**Understanding the PWM Waveform Graph:**\n\n"
+            "The graph shows the PWM signal over time:\n"
+            "- **Vertical jumps** = Signal switching between LOW (0V) and HIGH (5V)\n"
+            "- **Height of signal** = Voltage level\n"
+            "- **Shaded area** = Time the signal is ON\n"
+            "- **Duty cycle %** = How much of the cycle is shaded (ON time)\n\n"
+            "The **red dashed line** shows the average voltage, which equals (duty cycle / 100). "
+            "For example, at 50% duty cycle, average voltage = 2.5V. This average is what controls your device!"
+        )
+    
+    elif any(word in question_lower for word in ["duty cycle change", "what happens", "effect"]):
+        response = (
+            "**When You Change the Duty Cycle:**\n\n"
+            "The waveform updates instantly! You'll see:\n"
+            "- **Wider shaded area** = Higher duty cycle (more ON time)\n"
+            "- **Higher red line** = Higher average voltage\n"
+            "- **Larger device effect** = More power, more brightness/speed/heat\n\n"
+            "The real-world effects panel shows:\n"
+            "- **LED** gets brighter\n"
+            "- **Motor** spins faster\n"
+            "- **Buzzer** gets louder\n"
+            "- **Heater** gets hotter\n\n"
+            "This demonstrates how PWM gives you precise analog-like control from a digital signal!"
+        )
+    
+    elif any(word in question_lower for word in ["comparison", "preset", "mode", "eco", "normal", "performance"]):
+        response = (
+            "**Preset Modes & Comparison Feature:**\n\n"
+            "**Preset Modes** provide quick-start configurations:\n"
+            "- **Eco Mode** (25%) = Energy-saving, minimal power\n"
+            "- **Normal Mode** (50%) = Balanced operation\n"
+            "- **Performance Mode** (85%) = Maximum power output\n\n"
+            "**Comparison Mode** lets you compare two PWM settings side-by-side:\n"
+            "1. Enable 'Comparison Mode' checkbox in the sidebar\n"
+            "2. Set the comparison duty cycle using the second slider\n"
+            "3. See both waveforms overlaid in a comparison graph\n\n"
+            "This helps you understand the difference between settings!"
+        )
+    
+    # === DEFAULT RESPONSE ===
+    else:
+        response = (
+            "I'm here to help with PWM and this simulation! 🚀\n\n"
+            "Try asking about:\n"
+            "- **PWM Concepts:** 'What is PWM?', 'What is duty cycle?', 'What is frequency?', 'Why use PWM?'\n"
+            "- **Devices:** 'How does LED work?', 'Tell me about motor', 'How does buzzer work?', 'Heater control'\n"
+            "- **Project:** 'What does this dashboard do?', 'How does the graph work?', 'What happens when duty cycle changes?'"
+        )
+    
+    # Display response
+    st.success(f"**🤖 AI Assistant:** {response}")
+# === AI CHAT UPGRADE END ===
 # === AI FEATURE END ===
