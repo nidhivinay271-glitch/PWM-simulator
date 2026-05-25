@@ -357,6 +357,99 @@ else:
     rl_resistance_ohm = 2.0
     rl_output_mode = "Resistor Voltage"
 
+if selected_device == "LED":
+    led_forward_v = st.sidebar.slider(
+        label="Forward Voltage Vf (V)",
+        min_value=0.8,
+        max_value=3.6,
+        value=2.0,
+        step=0.05,
+        help="Approximate LED forward voltage drop"
+    )
+    led_series_resistance_ohm = st.sidebar.slider(
+        label="Series Resistance (ohm)",
+        min_value=10.0,
+        max_value=1000.0,
+        value=220.0,
+        step=10.0,
+        help="Series resistor used to limit LED current"
+    )
+else:
+    led_forward_v = 2.0
+    led_series_resistance_ohm = 220.0
+
+if selected_device == "Heater":
+    heater_resistance_ohm = st.sidebar.slider(
+        label="Heater Resistance (ohm)",
+        min_value=1.0,
+        max_value=200.0,
+        value=12.0,
+        step=1.0,
+        help="Resistive heater load"
+    )
+    heater_inertia_ms = st.sidebar.slider(
+        label="Thermal Inertia (ms)",
+        min_value=5.0,
+        max_value=500.0,
+        value=65.0,
+        step=5.0,
+        help="Thermal smoothing time constant"
+    )
+else:
+    heater_resistance_ohm = 12.0
+    heater_inertia_ms = 65.0
+
+if selected_device == "Motor":
+    motor_supply_v = st.sidebar.slider(
+        label="Supply Voltage (V)",
+        min_value=1.0,
+        max_value=24.0,
+        value=VMAX,
+        step=0.5,
+        help="Motor supply voltage for the PWM drive"
+    )
+    motor_armature_resistance_ohm = st.sidebar.slider(
+        label="Armature Resistance (ohm)",
+        min_value=0.1,
+        max_value=20.0,
+        value=2.0,
+        step=0.1,
+        help="Motor armature resistance"
+    )
+    motor_inductance_h = st.sidebar.slider(
+        label="Inductance (H)",
+        min_value=0.0001,
+        max_value=1.0,
+        value=0.01,
+        step=0.0001,
+        help="Motor inductance"
+    )
+else:
+    motor_supply_v = VMAX
+    motor_armature_resistance_ohm = 2.0
+    motor_inductance_h = 0.01
+
+if selected_device == "Buzzer":
+    buzzer_operating_v = st.sidebar.slider(
+        label="Operating Voltage (V)",
+        min_value=1.0,
+        max_value=12.0,
+        value=VMAX,
+        step=0.5,
+        help="Nominal buzzer operating voltage"
+    )
+    buzzer_gain = st.sidebar.slider(
+        label="Duty Sensitivity (gain)",
+        min_value=0.1,
+        max_value=3.0,
+        value=1.0,
+        step=0.1,
+        help="Gain multiplier on PWM response"
+    )
+else:
+    buzzer_operating_v = VMAX
+    buzzer_gain = 1.0
+
 diode_drop_v = st.sidebar.slider(
     label="Diode Forward Drop (V)",
     min_value=0.1,
@@ -536,7 +629,10 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
     vin = signal_array
 
     if device == "LED":
-        return vin
+        vf = float(params["led_forward_v"])
+        r_led = max(1e-6, float(params["led_series_resistance_ohm"]))
+        led_drop = np.where(vin > vf, vin - vf, 0.0)
+        return led_drop * (220.0 / r_led)
 
     if device == "Capacitor (RC)":
         return simulate_rc_response(
@@ -575,13 +671,24 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
         return output
 
     if device == "Motor":
-        return simulate_first_order_response(time_array_ms, vin, params["motor_tau_ms"])
+        motor_supply_v = float(params["motor_supply_v"])
+        motor_r = float(params["motor_armature_resistance_ohm"])
+        motor_l = float(params["motor_inductance_h"])
+        vin_scaled = (vin / VMAX) * motor_supply_v
+        _, v_r, _ = simulate_rl_response(time_array_ms, vin_scaled, motor_l, motor_r)
+        return v_r
 
     if device == "Buzzer":
-        return simulate_first_order_response(time_array_ms, vin, params["buzzer_tau_ms"])
+        buzzer_v = float(params["buzzer_operating_v"])
+        buzzer_gain = float(params["buzzer_gain"])
+        vin_scaled = (vin / VMAX) * buzzer_v
+        return simulate_first_order_response(time_array_ms, vin_scaled * buzzer_gain, params["buzzer_tau_ms"])
 
     if device == "Heater":
-        return simulate_first_order_response(time_array_ms, vin, params["heater_tau_ms"])
+        heater_r = max(1e-6, float(params["heater_resistance_ohm"]))
+        heater_inertia_ms = float(params["heater_inertia_ms"])
+        heater_power_proxy = np.clip((vin ** 2) / heater_r, 0.0, VMAX)
+        return simulate_first_order_response(time_array_ms, heater_power_proxy, heater_inertia_ms)
 
     return vin
 
@@ -594,12 +701,21 @@ def compute_device_output_cached(device, time_array_ms, signal_array, duty_cycle
         "rl_resistance_ohm": params_tuple[3],
         "rl_tau_ms": params_tuple[4],
         "rl_output_mode": params_tuple[5],
-        "diode_drop_v": params_tuple[6],
-        "zener_v": params_tuple[7],
-        "transistor_thresh_v": params_tuple[8],
-        "motor_tau_ms": params_tuple[9],
-        "buzzer_tau_ms": params_tuple[10],
-        "heater_tau_ms": params_tuple[11]
+        "led_forward_v": params_tuple[6],
+        "led_series_resistance_ohm": params_tuple[7],
+        "heater_resistance_ohm": params_tuple[8],
+        "heater_inertia_ms": params_tuple[9],
+        "motor_supply_v": params_tuple[10],
+        "motor_armature_resistance_ohm": params_tuple[11],
+        "motor_inductance_h": params_tuple[12],
+        "buzzer_operating_v": params_tuple[13],
+        "buzzer_gain": params_tuple[14],
+        "diode_drop_v": params_tuple[15],
+        "zener_v": params_tuple[16],
+        "transistor_thresh_v": params_tuple[17],
+        "motor_tau_ms": params_tuple[18],
+        "buzzer_tau_ms": params_tuple[19],
+        "heater_tau_ms": params_tuple[20]
     }
     return compute_device_output(device, time_array_ms, signal_array, duty_cycle, params)
 
@@ -922,6 +1038,15 @@ device_params = {
     "rl_resistance_ohm": rl_resistance_ohm,
     "rl_tau_ms": (rl_inductance_mh / 1000.0) / max(1e-6, rl_resistance_ohm) * 1000.0,
     "rl_output_mode": rl_output_mode,
+    "led_forward_v": float(np.clip(led_forward_v, 0.8, 3.6)),
+    "led_series_resistance_ohm": float(max(1.0, led_series_resistance_ohm)),
+    "heater_resistance_ohm": float(max(1.0, heater_resistance_ohm)),
+    "heater_inertia_ms": float(max(1.0, heater_inertia_ms)),
+    "motor_supply_v": float(max(0.1, motor_supply_v)),
+    "motor_armature_resistance_ohm": float(max(0.01, motor_armature_resistance_ohm)),
+    "motor_inductance_h": float(max(1e-6, motor_inductance_h)),
+    "buzzer_operating_v": float(max(0.1, buzzer_operating_v)),
+    "buzzer_gain": float(max(0.01, buzzer_gain)),
     "diode_drop_v": float(np.clip(diode_drop_v, 0.1, 1.2)),
     "zener_v": float(np.clip(zener_v, 2.0, VMAX)),
     "transistor_thresh_v": float(np.clip(transistor_thresh_v, 0.2, VMAX)),
@@ -936,6 +1061,15 @@ device_params_tuple = (
     device_params["rl_resistance_ohm"],
     device_params["rl_tau_ms"],
     device_params["rl_output_mode"],
+    device_params["led_forward_v"],
+    device_params["led_series_resistance_ohm"],
+    device_params["heater_resistance_ohm"],
+    device_params["heater_inertia_ms"],
+    device_params["motor_supply_v"],
+    device_params["motor_armature_resistance_ohm"],
+    device_params["motor_inductance_h"],
+    device_params["buzzer_operating_v"],
+    device_params["buzzer_gain"],
     device_params["diode_drop_v"],
     device_params["zener_v"],
     device_params["transistor_thresh_v"],
@@ -1827,6 +1961,5 @@ if user_question:
     st.success(f"**🤖 AI Assistant:** {response}")
 # === AI CHAT UPGRADE END ===
 # === AI FEATURE END ===
-
 
 
