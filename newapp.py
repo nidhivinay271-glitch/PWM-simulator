@@ -1,4 +1,34 @@
+"""
+PWM Signal Simulator Dashboard
+A web-based dashboard to simulate PWM signals and visualize their effects on LED brightness and motor speed.
+"""
 
+import streamlit as st
+import numpy as np
+import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+
+
+# ============================================================================
+# MODULE CONSTANTS
+# ============================================================================
+# IMPROVED: Define voltage constant at module level for consistency
+VMAX = 5.0  # Maximum voltage for PWM signal (volts)
+
+
+# ============================================================================
+# PAGE CONFIGURATION
+# ============================================================================
+st.set_page_config(
+    page_title="PWM Signal Simulator",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS for better styling
+st.markdown("""
+    <style>
         .main {
             padding: 0px;
         }
@@ -1130,6 +1160,12 @@ if user_question:
             "- **Devices:** 'How does LED work?', 'Tell me about motor', 'How does buzzer work?', 'Heater control'\n"
             "- **Project:** 'What does this dashboard do?', 'How does the graph work?', 'What happens when duty cycle changes?'"
         )
+    
+    # Display response
+    st.success(f"**🤖 AI Assistant:** {response}")
+# === AI CHAT UPGRADE END ===
+# === AI FEATURE END ===
+
     
     # Display response
     st.success(f"**🤖 AI Assistant:** {response}")
