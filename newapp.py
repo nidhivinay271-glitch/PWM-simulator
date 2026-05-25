@@ -301,14 +301,26 @@ selected_device = st.sidebar.selectbox(
 
 # Device-specific controls
 st.sidebar.markdown("### Device Parameters")
-rc_tau_ms = st.sidebar.slider(
-    label="RC Time Constant (ms)",
-    min_value=1.0,
-    max_value=200.0,
-    value=3.0,
-    step=1.0,
-    help="Capacitor charge/discharge time constant"
-) if selected_device == "Capacitor (RC)" else 3.0
+if selected_device == "Capacitor (RC)":
+    rc_resistance_ohm = st.sidebar.slider(
+        label="Series Resistance (ohm)",
+        min_value=0.1,
+        max_value=100.0,
+        value=2.0,
+        step=0.1,
+        help="Series resistance used for RC time constant"
+    )
+    rc_capacitance_uf = st.sidebar.slider(
+        label="Capacitance (uF)",
+        min_value=0.1,
+        max_value=1000.0,
+        value=10.0,
+        step=0.1,
+        help="Capacitor value used for RC time constant"
+    )
+else:
+    rc_resistance_ohm = 2.0
+    rc_capacitance_uf = 10.0
 
 if selected_device == "Inductor (RL)":
     rl_inductance_mh = st.sidebar.slider(
@@ -473,6 +485,20 @@ def first_order_response(vin, dt_ms, tau_ms):
     return simulate_first_order_response(time_array_ms, vin, tau_ms)
 
 
+def simulate_rc_response(time_array_ms, input_signal, resistance_ohm, capacitance_f):
+    """Simulate RC response using dV/dt = (Vin - Vc) / (R*C)."""
+    dt_ms = _sanitize_time_steps(time_array_ms)
+    dt_s = dt_ms / 1000.0
+    resistance_ohm = max(1e-6, float(resistance_ohm))
+    capacitance_f = max(1e-12, float(capacitance_f))
+    vc = np.zeros_like(input_signal, dtype=float)
+    rc = resistance_ohm * capacitance_f
+    for i in range(1, len(input_signal)):
+        dv = (input_signal[i - 1] - vc[i - 1]) / rc * dt_s[i]
+        vc[i] = vc[i - 1] + dv
+    return vc
+
+
 def simulate_rl_response(time_array_ms, input_signal, inductance_h, resistance_ohm):
     """Simulate RL response using L di/dt = Vin - i*R and return i, V_R, V_L."""
     dt_ms = _sanitize_time_steps(time_array_ms)
@@ -501,7 +527,12 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
         return vin
 
     if device == "Capacitor (RC)":
-        return simulate_first_order_response(time_array_ms, vin, params["rc_tau_ms"])
+        return simulate_rc_response(
+            time_array_ms,
+            vin,
+            params["rc_resistance_ohm"],
+            params["rc_capacitance_f"]
+        )
 
     if device == "Inductor (RL)":
         _, v_r, v_l = simulate_rl_response(
@@ -548,16 +579,17 @@ def compute_device_output_cached(device, time_array_ms, signal_array, duty_cycle
     if DEBUG_VALIDATION:
         print(f"[CACHE HIT] params={params_tuple}")
     params = {
-        "rc_tau_ms": params_tuple[0],
-        "rl_inductance_h": params_tuple[1],
-        "rl_resistance_ohm": params_tuple[2],
-        "rl_output_mode": params_tuple[3],
-        "diode_drop_v": params_tuple[4],
-        "zener_v": params_tuple[5],
-        "transistor_thresh_v": params_tuple[6],
-        "motor_tau_ms": params_tuple[7],
-        "buzzer_tau_ms": params_tuple[8],
-        "heater_tau_ms": params_tuple[9]
+        "rc_resistance_ohm": params_tuple[0],
+        "rc_capacitance_f": params_tuple[1],
+        "rl_inductance_h": params_tuple[2],
+        "rl_resistance_ohm": params_tuple[3],
+        "rl_output_mode": params_tuple[4],
+        "diode_drop_v": params_tuple[5],
+        "zener_v": params_tuple[6],
+        "transistor_thresh_v": params_tuple[7],
+        "motor_tau_ms": params_tuple[8],
+        "buzzer_tau_ms": params_tuple[9],
+        "heater_tau_ms": params_tuple[10]
     }
     return compute_device_output(device, time_array_ms, signal_array, duty_cycle, params)
 
@@ -869,7 +901,8 @@ if abs(num_cycles - round(num_cycles)) > 0.05:
     st.caption("Note: Non-integer cycles in the time window may cause phase drift in the display.")
 
 device_params = {
-    "rc_tau_ms": rc_tau_ms,
+    "rc_resistance_ohm": rc_resistance_ohm,
+    "rc_capacitance_f": rc_capacitance_uf * 1e-6,
     "rl_inductance_h": rl_inductance_mh / 1000.0,
     "rl_resistance_ohm": rl_resistance_ohm,
     "rl_output_mode": rl_output_mode,
@@ -881,7 +914,8 @@ device_params = {
     "heater_tau_ms": 65.0
 }
 device_params_tuple = (
-    device_params["rc_tau_ms"],
+    device_params["rc_resistance_ohm"],
+    device_params["rc_capacitance_f"],
     device_params["rl_inductance_h"],
     device_params["rl_resistance_ohm"],
     device_params["rl_output_mode"],
@@ -1493,7 +1527,12 @@ if comparison_mode and comparison_duty_cycle is not None:
             st.metric("Comparison Duty Cycle", f"{comparison_duty_cycle}%")
 
         if selected_device == "Capacitor (RC)":
-            st.caption(f"RC tau: {device_params['rc_tau_ms']:.1f} ms")
+            tau_ms = device_params["rc_resistance_ohm"] * device_params["rc_capacitance_f"] * 1000.0
+            st.caption(
+                f"R: {device_params['rc_resistance_ohm']:.2f} ohm | "
+                f"C: {device_params['rc_capacitance_f'] * 1e6:.2f} uF | "
+                f"tau: {tau_ms:.2f} ms"
+            )
         elif selected_device == "Inductor (RL)":
             st.caption(
                 f"L: {device_params['rl_inductance_h'] * 1000:.2f} mH | "
