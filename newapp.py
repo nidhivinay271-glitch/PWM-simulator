@@ -695,8 +695,12 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
     if device == "Buzzer":
         buzzer_v = float(params["buzzer_operating_v"])
         buzzer_gain = float(params["buzzer_gain"])
-        amplitude = (duty_cycle / 100.0) * buzzer_v * buzzer_gain
-        return np.full_like(vin, amplitude, dtype=float)
+        envelope_target = (vin / VMAX) * buzzer_v * buzzer_gain
+        envelope = np.zeros_like(envelope_target, dtype=float)
+        alpha = 0.1
+        for i in range(1, len(envelope)):
+            envelope[i] = envelope[i - 1] + alpha * (envelope_target[i] - envelope[i - 1])
+        return envelope
 
     if device == "Heater":
         heater_r = max(1e-6, float(params["heater_resistance_ohm"]))
@@ -704,7 +708,7 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
         power = (vin ** 2) / heater_r
         temp_rise = np.zeros_like(power, dtype=float)
         for i in range(1, len(power)):
-            dtemp = (power[i - 1] - temp_rise[i - 1]) / tau_s * dt_s[i]
+            dtemp = (power[i] - temp_rise[i - 1]) / tau_s * dt_s[i]
             temp_rise[i] = temp_rise[i - 1] + dtemp
         return temp_rise
 
@@ -1979,5 +1983,4 @@ if user_question:
     st.success(f"**🤖 AI Assistant:** {response}")
 # === AI CHAT UPGRADE END ===
 # === AI FEATURE END ===
-
 
