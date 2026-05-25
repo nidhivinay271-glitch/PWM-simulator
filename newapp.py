@@ -549,7 +549,7 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
 
     if device == "Zener Diode":
         vz = float(params["zener_v"])
-        return np.where(vin > vz, vz, vin)
+        return np.minimum(vin, vz)
 
     if device == "Transistor":
         vth = float(params["transistor_thresh_v"])
