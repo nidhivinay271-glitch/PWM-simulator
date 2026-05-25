@@ -512,7 +512,7 @@ def simulate_rc_response(time_array_ms, input_signal, resistance_ohm, capacitanc
 
 
 def simulate_rl_response(time_array_ms, vin, inductance_h, resistance_ohm):
-    """Simulate RL response using V = L * di/dt + R*i and return V_R, V_L."""
+    """Simulate RL response using V = L * di/dt + R*i and return i, V_R, V_L."""
     dt_ms = _sanitize_time_steps(time_array_ms)
     dt_s = dt_ms / 1000.0
     inductance_h = max(1e-6, float(inductance_h))
@@ -523,7 +523,7 @@ def simulate_rl_response(time_array_ms, vin, inductance_h, resistance_ohm):
         current[i] = current[i - 1] + di
     v_r = current * resistance_ohm
     v_l = vin - v_r
-    return v_r, v_l
+    return current, v_r, v_l
 
 
 def compute_device_output(device, time_array_ms, signal_array, duty_cycle, params):
@@ -547,7 +547,7 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
         )
 
     if device == "Inductor (RL)":
-        v_r, v_l = simulate_rl_response(
+        _, v_r, v_l = simulate_rl_response(
             time_array_ms,
             vin,
             params["rl_inductance_h"],
@@ -951,8 +951,21 @@ device_output = compute_device_output_cached(
     duty_cycle,
     device_params_tuple
 )
+rl_current = None
+rl_v_r = None
+rl_v_l = None
+if selected_device == "Inductor (RL)":
+    rl_current, rl_v_r, rl_v_l = simulate_rl_response(
+        time_array,
+        signal_array,
+        device_params["rl_inductance_h"],
+        device_params["rl_resistance_ohm"]
+    )
 if debug_mode and selected_device == "Inductor (RL)":
     print(f"[RL CHECKSUM] main={_checksum_array(device_output)}")
+    tau_ms = device_params["rl_inductance_h"] / max(1e-6, device_params["rl_resistance_ohm"]) * 1000.0
+    if rl_current is not None and rl_v_l is not None:
+        print(f"[RL STATS] tau_ms={tau_ms:.4f}, i_max={rl_current.max():.6f} A, v_l_min={rl_v_l.min():.3f} V, v_l_max={rl_v_l.max():.3f} V")
 if debug_mode:
     dt_ms = _sanitize_time_steps(time_array)
     print(f"[CACHE KEY] pwm=({duty_cycle},{frequency},{time_duration})")
@@ -1000,7 +1013,14 @@ with col1:
     if show_pwm_trace:
         ax.step(time_array, signal_array, linewidth=2, color="#667eea", label="PWM Signal", where="post")
         ax.fill_between(time_array, 0, signal_array, alpha=0.3, color="#667eea", step="post")
-    if show_device_trace and device_output is not None:
+    if show_device_trace and selected_device == "Inductor (RL)" and rl_v_r is not None and rl_v_l is not None:
+        ax.plot(time_array, rl_v_r, linewidth=1.6, color="#2f855a", alpha=0.9, label="V_R (Resistor)")
+        ax.plot(time_array, rl_v_l, linewidth=1.6, color="#c53030", alpha=0.9, label="V_L (Inductor)")
+        ax_current = ax.twinx()
+        ax_current.plot(time_array, rl_current, linewidth=1.2, color="#4a5568", alpha=0.85, label="Current (A)")
+        ax_current.set_ylabel("Current (A)", fontsize=11, fontweight="bold", color="#4a5568")
+        ax_current.tick_params(axis="y", colors="#4a5568")
+    elif show_device_trace and device_output is not None:
         ax.plot(time_array, device_output, linewidth=1.5, color="#e74c3c", alpha=0.85, label=f"{selected_device} Output")
         ax.fill_between(time_array, 0, device_output, alpha=0.12, color="#e74c3c")
     # === PWM GRAPH FIX END ===
@@ -1013,6 +1033,10 @@ with col1:
     ax.set_yticklabels(["0V", "1V", "2V", "3V", "4V", "5V"])
     ax.grid(True, alpha=0.3, linestyle="--")
     handles, labels = ax.get_legend_handles_labels()
+    if selected_device == "Inductor (RL)" and show_device_trace:
+        handles_2, labels_2 = ax_current.get_legend_handles_labels()
+        handles += handles_2
+        labels += labels_2
     if handles:
         ax.legend(loc="upper right", fontsize=10)
     
@@ -1382,16 +1406,40 @@ fig_advanced.add_trace(go.Scatter(
     fill='tozeroy',
     fillcolor='rgba(102, 126, 234, 0.3)'
 ))
-# Add device response overlay
-fig_advanced.add_trace(go.Scatter(
-    x=time_array,
-    y=device_output,
-    mode='lines',
-    name=f"{selected_device} Output",
-    line=dict(color='#e74c3c', width=2)
-))
-if debug_mode and selected_device == "Inductor (RL)":
-    print(f"[RL CHECKSUM] advanced={_checksum_array(device_output)}")
+if selected_device == "Inductor (RL)" and rl_v_r is not None and rl_v_l is not None:
+    fig_advanced.add_trace(go.Scatter(
+        x=time_array,
+        y=rl_v_r,
+        mode='lines',
+        name='V_R (Resistor)',
+        line=dict(color='#2f855a', width=2)
+    ))
+    fig_advanced.add_trace(go.Scatter(
+        x=time_array,
+        y=rl_v_l,
+        mode='lines',
+        name='V_L (Inductor)',
+        line=dict(color='#c53030', width=2)
+    ))
+    fig_advanced.add_trace(go.Scatter(
+        x=time_array,
+        y=rl_current,
+        mode='lines',
+        name='Current (A)',
+        line=dict(color='#4a5568', width=1, dash='dot'),
+        yaxis='y2'
+    ))
+    if debug_mode:
+        print(f"[RL CHECKSUM] advanced={_checksum_array(rl_v_r)}")
+else:
+    # Add device response overlay
+    fig_advanced.add_trace(go.Scatter(
+        x=time_array,
+        y=device_output,
+        mode='lines',
+        name=f"{selected_device} Output",
+        line=dict(color='#e74c3c', width=2)
+    ))
 # === PWM GRAPH FIX END ===
 
 # FIXED: Add average voltage line at correct voltage scale
@@ -1411,6 +1459,15 @@ fig_advanced.update_layout(
     height=400,
     template="plotly_dark"
 )
+if selected_device == "Inductor (RL)":
+    fig_advanced.update_layout(
+        yaxis2=dict(
+            title="Current (A)",
+            overlaying="y",
+            side="right",
+            showgrid=False
+        )
+    )
 
 st.plotly_chart(fig_advanced, use_container_width=True)
 
