@@ -236,6 +236,17 @@ time_duration = st.sidebar.slider(
     help="Duration of waveform to display"
 )
 
+show_pwm_trace = st.sidebar.checkbox(
+    "Show PWM Signal",
+    value=True,
+    help="Toggle PWM waveform overlay for clarity"
+)
+show_device_trace = st.sidebar.checkbox(
+    "Show Device Output",
+    value=True,
+    help="Toggle device response overlay for clarity"
+)
+
 # === NEW FEATURE START ===
 comparison_mode = st.sidebar.checkbox(
     label="Enable Comparison Mode",
@@ -313,6 +324,9 @@ diode_drop_v = st.sidebar.slider(
     help="Voltage drop across a forward-biased diode"
 ) if selected_device == "Diode" else 0.7
 
+if selected_device == "Diode":
+    st.sidebar.caption("Ideal diode model assumes resistive load (no reactive smoothing).")
+
 zener_v = st.sidebar.slider(
     label="Zener Voltage (V)",
     min_value=2.0,
@@ -321,6 +335,9 @@ zener_v = st.sidebar.slider(
     step=0.1,
     help="Clamp level for the zener diode"
 ) if selected_device == "Zener Diode" else 3.3
+
+if selected_device == "Zener Diode":
+    st.sidebar.caption("Zener clamp assumes resistive load; reactive effects are not modeled.")
 
 transistor_thresh_v = st.sidebar.slider(
     label="Transistor Threshold (V)",
@@ -371,7 +388,7 @@ def generate_pwm_signal(duty_cycle, frequency, time_duration_ms):
     ------
     - Uses vectorized NumPy operations for 20-40x performance improvement
     - Includes input validation to prevent edge cases (frequency <= 0)
-    - Adaptive sampling based on frequency for optimal quality/performance balance
+    - Sampling uses a fixed samples-per-period approach for consistent fidelity
     - Signal scaled using module-level VMAX constant for consistency
     """
     # SAFETY: Validate frequency input to prevent mathematical errors
@@ -384,13 +401,14 @@ def generate_pwm_signal(duty_cycle, frequency, time_duration_ms):
     # CLEANED: Convert time duration to seconds for calculation
     time_duration_sec = time_duration_ms / 1000
     
-    # IMPROVED: Adaptive sampling based on frequency (better performance at high frequencies)
-    # Higher frequency = fewer samples needed; lower frequency = more samples for clarity
-    samples_per_cycle = min(200, max(50, int(2000 / frequency)))
-    num_cycles = frequency * time_duration_sec
-    # FIX: Ensure total_samples is never zero
-    total_samples = max(2, int(samples_per_cycle * num_cycles))
-    time_array = np.linspace(0, time_duration_sec, total_samples)
+    # Sampling strategy: fixed samples-per-period for consistent waveform fidelity
+    samples_per_period = 160
+    min_samples = 1000
+    max_samples = 20000
+    dt = period / samples_per_period
+    total_samples = int(time_duration_sec / dt)
+    total_samples = int(np.clip(total_samples, min_samples, max_samples))
+    time_array = np.linspace(0, time_duration_sec, total_samples, endpoint=False)
     
     # Calculate high time based on duty cycle
     high_time = (duty_cycle / 100) * period
@@ -415,37 +433,72 @@ def _sanitize_time_steps(time_array_ms):
 
 
 def simulate_first_order_response(time_array_ms, input_signal, tau_ms):
-    """Simulate a first-order RC/RL style response."""
+    """Simulate a first-order response using a stable exponential discretization (tau in ms)."""
+    assert tau_ms > 0, "tau_ms must be positive and in milliseconds"
     tau_ms = max(0.1, float(tau_ms))
     dt_ms = _sanitize_time_steps(time_array_ms)
     output = np.zeros_like(input_signal, dtype=float)
     for i in range(1, len(input_signal)):
-        alpha = min(1.0, dt_ms[i] / tau_ms)
+        alpha = 1.0 - np.exp(-dt_ms[i] / tau_ms)
         output[i] = output[i - 1] + alpha * (input_signal[i] - output[i - 1])
     return output
 
 
 def compute_device_output(device, time_array_ms, signal_array, duty_cycle, params):
     """Compute device-specific response signals."""
+    high_mask = signal_array > 0
     if device == "LED":
         return signal_array
     if device == "Motor":
-        return simulate_first_order_response(time_array_ms, signal_array, params["motor_tau_ms"])
+        filtered_voltage = simulate_first_order_response(
+            time_array_ms,
+            signal_array,
+            params["motor_tau_ms"]
+        )
+        voltage_norm = np.clip(filtered_voltage / VMAX, 0.0, 1.0)
+        return VMAX * (voltage_norm ** 0.6)
     if device == "Buzzer":
         return simulate_first_order_response(time_array_ms, signal_array, params["buzzer_tau_ms"])
     if device == "Heater":
         return simulate_first_order_response(time_array_ms, signal_array, params["heater_tau_ms"])
     if device == "Capacitor (RC)":
-        return simulate_first_order_response(time_array_ms, signal_array, params["rc_tau_ms"])
+        target = np.where(high_mask, VMAX, 0.0)
+        return simulate_first_order_response(time_array_ms, target, params["rc_tau_ms"])
     if device == "Inductor (RL)":
-        return simulate_first_order_response(time_array_ms, signal_array, params["rl_tau_ms"])
+        target = np.where(high_mask, VMAX, 0.0)
+        return simulate_first_order_response(time_array_ms, target, params["rl_tau_ms"])
     if device == "Diode":
         return np.maximum(signal_array - params["diode_drop_v"], 0.0)
     if device == "Zener Diode":
         return np.clip(signal_array, 0.0, params["zener_v"])
     if device == "Transistor":
-        return np.where(signal_array >= params["transistor_thresh_v"], VMAX, 0.0)
+        v_th = params["transistor_thresh_v"]
+        v_sat = max(0.2, 0.1 * v_th)
+        v_ce_sat = 0.2
+        linear_region = np.clip((signal_array - v_th) / v_sat, 0.0, 1.0)
+        v_out = np.where(
+            signal_array <= v_th,
+            0.0,
+            (VMAX - v_ce_sat) * linear_region
+        )
+        v_out = np.clip(v_out, 0.0, VMAX - v_ce_sat)
+        return simulate_first_order_response(time_array_ms, v_out, 3.0)
     return signal_array
+
+
+@st.cache_data(show_spinner=False)
+def compute_device_output_cached(device, time_array_ms, signal_array, duty_cycle, params_tuple):
+    params = {
+        "rc_tau_ms": params_tuple[0],
+        "rl_tau_ms": params_tuple[1],
+        "diode_drop_v": params_tuple[2],
+        "zener_v": params_tuple[3],
+        "transistor_thresh_v": params_tuple[4],
+        "motor_tau_ms": params_tuple[5],
+        "buzzer_tau_ms": params_tuple[6],
+        "heater_tau_ms": params_tuple[7]
+    }
+    return compute_device_output(device, time_array_ms, signal_array, duty_cycle, params)
 
 
 def calculate_led_brightness(duty_cycle):
@@ -556,6 +609,29 @@ def calculate_heater_status(duty_cycle):
         return "Hot"
 
 
+def _parse_hex_color(color_hex):
+    color_hex = color_hex.lstrip("#")
+    if len(color_hex) == 3:
+        color_hex = "".join([c * 2 for c in color_hex])
+    return tuple(int(color_hex[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _relative_luminance(rgb):
+    def channel(c):
+        c = c / 255.0
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = rgb
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+
+def _ensure_contrast(background_hex, preferred_value_color="#ffffff"):
+    rgb = _parse_hex_color(background_hex)
+    luminance = _relative_luminance(rgb)
+    text_color = "#1a202c" if luminance > 0.5 else "#ffffff"
+    value_color = preferred_value_color if luminance < 0.5 else "#1a202c"
+    return text_color, value_color
+
+
 def get_device_display(device, duty_cycle, device_output):
     """
     Build the display content for the selected application device.
@@ -573,23 +649,25 @@ def get_device_display(device, duty_cycle, device_output):
         Dictionary containing title, value, subtitle, styling, and colors
     """
     if device == "LED":
+        text_color, value_color = _ensure_contrast("#fbd38d", "#f39c12")
         return {
             "title": "💡 LED Brightness",
             "value": f"{duty_cycle}%",
             "subtitle": "Brightness Level",
             "background": f"rgba(255, {int(255 * (100 - duty_cycle) / 100)}, 0, 0.3)",
-            "value_color": "#f39c12",
-            "text_color": "#555"
+            "value_color": value_color,
+            "text_color": text_color
         }
     elif device == "Motor":
         motor_status = calculate_motor_speed(duty_cycle)
+        text_color, value_color = _ensure_contrast(get_motor_color(motor_status))
         return {
             "title": "⚙️ Motor Speed",
             "value": motor_status,
             "subtitle": "Motor Status",
             "background": get_motor_color(motor_status),
-            "value_color": "white",
-            "text_color": "white"
+            "value_color": value_color,
+            "text_color": text_color
         }
     elif device == "Buzzer":
         buzzer_status = calculate_buzzer_status(duty_cycle)
@@ -598,13 +676,14 @@ def get_device_display(device, duty_cycle, device_output):
             "Low Sound": "#3498db",
             "Loud Sound": "#e67e22"
         }.get(buzzer_status, "#808080")
+        text_color, value_color = _ensure_contrast(buzzer_color)
         return {
             "title": "🔊 Buzzer Status",
             "value": buzzer_status,
             "subtitle": "Sound Level",
             "background": buzzer_color,
-            "value_color": "white",
-            "text_color": "white"
+            "value_color": value_color,
+            "text_color": text_color
         }
     elif device == "Heater":
         heater_status = calculate_heater_status(duty_cycle)
@@ -613,13 +692,14 @@ def get_device_display(device, duty_cycle, device_output):
             "Warm": "#f39c12",
             "Hot": "#e74c3c"
         }.get(heater_status, "#808080")
+        text_color, value_color = _ensure_contrast(heater_color)
         return {
             "title": "♨️ Heater State",
             "value": heater_status,
             "subtitle": "Temperature Level",
             "background": heater_color,
-            "value_color": "white",
-            "text_color": "white"
+            "value_color": value_color,
+            "text_color": text_color
         }
     else:
         final_voltage = float(device_output[-1]) if device_output is not None and len(device_output) else 0.0
@@ -631,13 +711,14 @@ def get_device_display(device, duty_cycle, device_output):
             "Zener Diode": "⛓️ Zener Clamp",
             "Transistor": "🔀 Transistor Switch"
         }
+        text_color, value_color = _ensure_contrast("#e2e8f0")
         return {
             "title": device_titles.get(device, "🔧 Device Output"),
             "value": f"{final_voltage:.2f} V",
             "subtitle": f"Output Level ({voltage_pct}%)",
-            "background": "rgba(102, 126, 234, 0.18)",
-            "value_color": "#2d3748",
-            "text_color": "#4a5568"
+            "background": "#e2e8f0",
+            "value_color": value_color,
+            "text_color": text_color
         }
 
 
@@ -683,6 +764,10 @@ time_duration = int(np.clip(time_duration, 1, 10))
 # Generate PWM signal
 time_array, signal_array = generate_pwm_signal(duty_cycle, frequency, time_duration)
 
+num_cycles = (time_duration / 1000.0) * frequency
+if abs(num_cycles - round(num_cycles)) > 0.05:
+    st.caption("Note: Non-integer cycles in the time window may cause phase drift in the display.")
+
 device_params = {
     "rc_tau_ms": rc_tau_ms,
     "rl_tau_ms": rl_tau_ms,
@@ -693,8 +778,24 @@ device_params = {
     "buzzer_tau_ms": 12.0,
     "heater_tau_ms": 65.0
 }
+device_params_tuple = (
+    device_params["rc_tau_ms"],
+    device_params["rl_tau_ms"],
+    device_params["diode_drop_v"],
+    device_params["zener_v"],
+    device_params["transistor_thresh_v"],
+    device_params["motor_tau_ms"],
+    device_params["buzzer_tau_ms"],
+    device_params["heater_tau_ms"]
+)
 
-device_output = compute_device_output(selected_device, time_array, signal_array, duty_cycle, device_params)
+device_output = compute_device_output_cached(
+    selected_device,
+    time_array,
+    signal_array,
+    duty_cycle,
+    device_params_tuple
+)
 
 # IMPROVED: Calculate all real-world parameters in one section
 led_brightness = calculate_led_brightness(duty_cycle)
@@ -703,8 +804,9 @@ motor_color = get_motor_color(motor_speed)
 device_display = get_device_display(selected_device, duty_cycle, device_output)
 insight_label, insight_text, insight_color = get_smart_insight(duty_cycle)
 
-# IMPROVED: Pre-calculate motor animation speed to avoid redundant computation
-motor_animation_speed = max(0.5, 3 - duty_cycle / 50)
+# IMPROVED: Drive motor animation from simulated output
+motor_output_mean = float(np.mean(device_output)) if selected_device == "Motor" else duty_cycle / 100 * VMAX
+motor_animation_speed = max(0.6, 3 - (motor_output_mean / VMAX) * 2.2)
 
 
 # ============================================================================
@@ -724,9 +826,10 @@ with col1:
     # === PWM GRAPH FIX START ===
     # Plot PWM signal with step-style transitions for proper square wave visualization
     # Note: signal_array is now in voltage scale (0-5V) from generate_pwm_signal
-    ax.step(time_array, signal_array, linewidth=2, color="#667eea", label="PWM Signal", where="post")
-    ax.fill_between(time_array, 0, signal_array, alpha=0.3, color="#667eea", step="post")
-    if device_output is not None:
+    if show_pwm_trace:
+        ax.step(time_array, signal_array, linewidth=2, color="#667eea", label="PWM Signal", where="post")
+        ax.fill_between(time_array, 0, signal_array, alpha=0.3, color="#667eea", step="post")
+    if show_device_trace and device_output is not None:
         ax.plot(time_array, device_output, linewidth=1.5, color="#e74c3c", alpha=0.85, label=f"{selected_device} Output")
         ax.fill_between(time_array, 0, device_output, alpha=0.12, color="#e74c3c")
     # === PWM GRAPH FIX END ===
@@ -844,20 +947,84 @@ with col2:
     else:
         final_voltage = float(device_output[-1]) if device_output is not None and len(device_output) else 0.0
         fill_pct = int(np.clip((final_voltage / VMAX) * 100, 0, 100))
-        st.markdown(
-            f"""
-            <div class="feature-card">
-                <div class="feature-title">{selected_device} Response</div>
-                <div style="display:flex; justify-content:center; align-items:center; min-height:94px;">
-                    <div style="width:160px; height:14px; background:#edf2f7; border-radius:999px; overflow:hidden;">
-                        <div style="width:{fill_pct}%; height:100%; background:linear-gradient(90deg, #667eea, #f6ad55);"></div>
+        if selected_device == "Capacitor (RC)":
+            st.markdown(
+                f"""
+                <div class="feature-card">
+                    <div class="feature-title">Capacitor Charge</div>
+                    <div style="display:flex; justify-content:center; align-items:center; min-height:94px;">
+                        <div style="width:180px; height:16px; background:#e2e8f0; border-radius:999px; overflow:hidden;">
+                            <div style="width:{fill_pct}%; height:100%; background:linear-gradient(90deg, #38a169, #68d391); transition:width 0.3s ease;"></div>
+                        </div>
                     </div>
+                    <div style="text-align:center; margin-top:10px; color:#5b6472; font-size:13px;">Charging to {final_voltage:.2f} V</div>
                 </div>
-                <div style="text-align:center; margin-top:10px; color:#5b6472; font-size:13px;">Output level: {final_voltage:.2f} V</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+                """,
+                unsafe_allow_html=True
+            )
+        elif selected_device == "Inductor (RL)":
+            st.markdown(
+                f"""
+                <div class="feature-card">
+                    <div class="feature-title">Inductor Current Ramp</div>
+                    <div style="display:flex; justify-content:center; align-items:center; min-height:94px;">
+                        <div style="width:180px; height:16px; background:#e2e8f0; border-radius:6px; overflow:hidden;">
+                            <div style="width:{fill_pct}%; height:100%; background:linear-gradient(90deg, #3182ce, #90cdf4); transition:width 0.3s ease;"></div>
+                        </div>
+                    </div>
+                    <div style="text-align:center; margin-top:10px; color:#5b6472; font-size:13px;">Current build-up to {final_voltage:.2f} V</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        elif selected_device == "Diode":
+            st.markdown(
+                f"""
+                <div class="feature-card">
+                    <div class="feature-title">Diode Conduction</div>
+                    <div style="display:flex; justify-content:center; align-items:center; gap:12px; min-height:94px;">
+                        <div style="font-size:32px;">➡️</div>
+                        <div style="width:120px; height:12px; background:#e2e8f0; border-radius:999px; overflow:hidden;">
+                            <div style="width:{fill_pct}%; height:100%; background:linear-gradient(90deg, #f56565, #feb2b2);"></div>
+                        </div>
+                    </div>
+                    <div style="text-align:center; margin-top:10px; color:#5b6472; font-size:13px;">Forward drop applied, output {final_voltage:.2f} V</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        elif selected_device == "Zener Diode":
+            clamp_pct = int(np.clip((device_params["zener_v"] / VMAX) * 100, 0, 100))
+            st.markdown(
+                f"""
+                <div class="feature-card">
+                    <div class="feature-title">Zener Clamp</div>
+                    <div style="display:flex; justify-content:center; align-items:center; min-height:94px;">
+                        <div style="position:relative; width:180px; height:16px; background:#e2e8f0; border-radius:999px; overflow:hidden;">
+                            <div style="width:{fill_pct}%; height:100%; background:linear-gradient(90deg, #805ad5, #b794f4);"></div>
+                            <div style="position:absolute; left:{clamp_pct}%; top:-6px; width:2px; height:28px; background:#2d3748;"></div>
+                        </div>
+                    </div>
+                    <div style="text-align:center; margin-top:10px; color:#5b6472; font-size:13px;">Clamped at {device_params['zener_v']:.2f} V</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        else:
+            is_on = final_voltage >= (0.9 * VMAX)
+            st.markdown(
+                f"""
+                <div class="feature-card">
+                    <div class="feature-title">Transistor Switching</div>
+                    <div style="display:flex; justify-content:center; align-items:center; min-height:94px; gap:12px;">
+                        <div style="width:68px; height:28px; border-radius:999px; background:{'#38a169' if is_on else '#a0aec0'}; display:flex; align-items:center; justify-content:center; color:white; font-weight:700;">{'ON' if is_on else 'OFF'}</div>
+                        <div style="font-size:28px;">🔀</div>
+                    </div>
+                    <div style="text-align:center; margin-top:10px; color:#5b6472; font-size:13px;">Threshold {device_params['transistor_thresh_v']:.2f} V, output {final_voltage:.2f} V</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
     # === NEW FEATURE END ===
 
 
@@ -1143,6 +1310,17 @@ if comparison_mode and comparison_duty_cycle is not None:
             st.metric("Primary Duty Cycle", f"{duty_cycle}%")
         with comparison_col2:
             st.metric("Comparison Duty Cycle", f"{comparison_duty_cycle}%")
+
+        if selected_device == "Capacitor (RC)":
+            st.caption(f"RC tau: {device_params['rc_tau_ms']:.1f} ms")
+        elif selected_device == "Inductor (RL)":
+            st.caption(f"RL tau: {device_params['rl_tau_ms']:.1f} ms")
+        elif selected_device == "Diode":
+            st.caption(f"Diode drop: {device_params['diode_drop_v']:.2f} V")
+        elif selected_device == "Zener Diode":
+            st.caption(f"Zener clamp: {device_params['zener_v']:.2f} V")
+        elif selected_device == "Transistor":
+            st.caption(f"Transistor Vth: {device_params['transistor_thresh_v']:.2f} V")
     else:
         # CLEANED: Handle invalid comparison duty cycle
         st.warning("⚠️ Invalid comparison duty cycle. Please reset comparison mode.")
@@ -1265,6 +1443,51 @@ if user_question:
             "- **High duty cycle (50-100%)** = Hot (high heat)\n\n"
             "Higher duty cycle means the heater is ON longer, generating more heat. "
             "Select 'Heater' from the device dropdown to see the animated heat bars showing temperature rise!"
+        )
+
+    elif any(word in question_lower for word in ["capacitor", "rc", "charge", "discharge"]):
+        response = (
+            "**Capacitor (RC) Response with PWM:**\n"
+            "A capacitor does not jump instantly. It **charges and discharges exponentially**.\n"
+            "- When PWM is HIGH, the capacitor voltage ramps up toward 5V\n"
+            "- When PWM is LOW, it decays back toward 0V\n"
+            "The RC time constant controls how smooth or slow the curve is. Increase the RC slider to see slower charging."
+        )
+
+    elif any(word in question_lower for word in ["inductor", "rl", "current", "ramp"]):
+        response = (
+            "**Inductor (RL) Response with PWM:**\n"
+            "An inductor resists changes in current, so the output **ramps up and down** rather than switching instantly.\n"
+            "- PWM HIGH causes a gradual current rise\n"
+            "- PWM LOW causes a gradual decay\n"
+            "The RL time constant controls the ramp speed. Larger values make the slope gentler."
+        )
+
+    elif any(word in question_lower for word in ["diode", "rectifier", "forward drop"]):
+        response = (
+            "**Diode Behavior with PWM:**\n"
+            "A diode allows current in one direction and introduces a **forward voltage drop**.\n"
+            "- PWM HIGH is clipped by the diode drop (e.g., 5V becomes ~4.3V)\n"
+            "- PWM LOW stays at 0V\n"
+            "This is why the waveform looks like a clipped square wave."
+        )
+
+    elif any(word in question_lower for word in ["zener", "clamp", "zener diode"]):
+        response = (
+            "**Zener Diode Clamp with PWM:**\n"
+            "A zener diode **limits voltage** to a fixed clamp value.\n"
+            "- PWM HIGH rises until it hits the zener voltage\n"
+            "- Anything above the clamp is held at that level\n"
+            "Use the zener voltage slider to see the clamp line move."
+        )
+
+    elif any(word in question_lower for word in ["transistor", "switch", "threshold"]):
+        response = (
+            "**Transistor Switching with PWM:**\n"
+            "A transistor behaves like a **threshold-controlled switch**.\n"
+            "- Below the threshold, it stays OFF (0V output)\n"
+            "- Above the threshold, it turns ON (near 5V output)\n"
+            "Adjust the threshold slider to see how much PWM is needed to switch it on."
         )
     
     # === PROJECT-RELATED ===
