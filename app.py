@@ -5,6 +5,10 @@ A web-based dashboard to simulate PWM signals and visualize their effects on LED
 
 import streamlit as st
 import numpy as np
+
+import matplotlib
+matplotlib.use('Agg')   # ✅ ADD THIS LINE HERE
+
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 
