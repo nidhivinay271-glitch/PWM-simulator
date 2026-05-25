@@ -567,7 +567,6 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
     return vin
 
 
-@st.cache_data(show_spinner=False)
 def compute_device_output_cached(device, time_array_ms, signal_array, duty_cycle, params_tuple):
     if DEBUG_VALIDATION:
         print(f"[CACHE HIT] params={params_tuple}")
