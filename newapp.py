@@ -3,22 +3,117 @@ PWM Signal Simulator Dashboard
 A web-based dashboard to simulate PWM signals and visualize their effects on LED brightness and motor speed.
 """
 
+import matplotlib
+matplotlib.use('Agg')
+
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 
+st.cache_data.clear()
 
-# ============================================================================
-# MODULE CONSTANTS
-# ============================================================================
-# IMPROVED: Define voltage constant at module level for consistency
-VMAX = 5.0  # Maximum voltage for PWM signal (volts)
+VMAX = 5.0
+FREQUENCY_MIN = 1
+FREQUENCY_MAX = 10000
+DUTY_CYCLE_MIN = 0
+DUTY_CYCLE_MAX = 100
+TIME_DURATION_MIN = 1
+TIME_DURATION_MAX = 10
 
 
-# ============================================================================
-# PAGE CONFIGURATION
-# ============================================================================
+def generate_rc_response(vin, dt, R, C):
+    """RC charging/discharging response."""
+    R = max(1, R)
+    C = max(1e-8, C)
+    tau = R * C
+    alpha = dt / (tau + dt)
+    vout = np.zeros_like(vin, dtype=np.float64)
+    for i in range(1, len(vin)):
+        vout[i] = vout[i-1] + alpha * (vin[i] - vout[i-1])
+    return vout
+
+
+def generate_rl_response(vin, dt, R, L):
+    """RL current lag response."""
+    R = max(0.1, R)
+    L = max(1e-6, L)
+    beta = dt / L
+    i = np.zeros_like(vin, dtype=np.float64)
+    vout = np.zeros_like(vin, dtype=np.float64)
+    for k in range(1, len(vin)):
+        i[k] = i[k-1] + beta * (vin[k] - R * i[k-1])
+        vout[k] = R * i[k]
+    return np.clip(vout, 0, VMAX)
+
+
+def generate_diode_output(vin, Vf=0.7):
+    """Diode forward conduction."""
+    Vf = max(0.3, min(0.9, Vf))
+    return np.where(vin > Vf, vin - Vf, 0)
+
+
+def generate_zener_output(vin, Vz=5.1, Vf=0.7):
+    """Zener diode voltage regulation."""
+    Vz = max(2.4, min(12.0, Vz))
+    Vf = max(0.3, min(0.9, Vf))
+    vout = np.zeros_like(vin, dtype=np.float64)
+    for i in range(len(vin)):
+        if vin[i] < Vf:
+            vout[i] = 0
+        elif vin[i] < Vz:
+            vout[i] = vin[i] - Vf
+        else:
+            vout[i] = Vz
+    return vout
+
+
+def generate_transistor_output(vin, Vcc=5.0, Vth=0.7, Vsat=0.2):
+    """Transistor switching behavior."""
+    Vth = max(0.5, min(1.2, Vth))
+    Vsat = max(0.1, min(0.3, Vsat))
+    return np.where(vin > Vth, Vcc - Vsat, 0)
+
+
+def process_device_signal(device, pwm_signal, time_array, device_params=None):
+    """Transform PWM waveform based on real device behavior."""
+    if device_params is None:
+        device_params = {}
+    
+    time_sec = np.maximum(time_array / 1000.0, 1e-6)
+    dt = np.diff(time_sec, prepend=time_sec[0])
+    dt = np.maximum(dt, 1e-6)
+    
+    if device == "LED":
+        return pwm_signal
+    elif device == "Motor":
+        return generate_rl_response(pwm_signal, dt, R=10, L=1e-3)
+    elif device == "Buzzer":
+        return pwm_signal
+    elif device == "Heater":
+        return generate_rc_response(pwm_signal, dt, R=10000, C=1e-3)
+    elif device == "Capacitor":
+        R = device_params.get("R", 1000)
+        C = device_params.get("C", 1e-4)
+        return generate_rc_response(pwm_signal, dt, R, C)
+    elif device == "Inductor":
+        R = device_params.get("R", 50)
+        L = device_params.get("L", 0.1)
+        return generate_rl_response(pwm_signal, dt, R, L)
+    elif device == "Zener Diode":
+        Vz = device_params.get("Vz", 5.1)
+        return generate_zener_output(pwm_signal, Vz=Vz)
+    elif device == "Diode":
+        Vf = device_params.get("Vf", 0.7)
+        return generate_diode_output(pwm_signal, Vf=Vf)
+    elif device == "Transistor":
+        Vth = device_params.get("Vth", 0.7)
+        Vsat = device_params.get("Vsat", 0.2)
+        return generate_transistor_output(pwm_signal, Vcc=VMAX, Vth=Vth, Vsat=Vsat)
+    else:
+        return pwm_signal
+
+
 st.set_page_config(
     page_title="PWM Signal Simulator",
     page_icon="⚡",
@@ -26,7 +121,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
 st.markdown("""
     <style>
         .main {
@@ -128,6 +222,72 @@ st.markdown("""
             0%, 100% { transform: scaleY(0.72); opacity: 0.68; }
             50% { transform: scaleY(1.05); opacity: 1; }
         }
+        .capacitor-orb {
+            width: 74px;
+            height: 74px;
+            border-radius: 50%;
+            margin: 0 auto;
+            background: radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 1), rgba(176, 190, 255, 0.92) 32%, rgba(102, 126, 234, 0.95) 62%, rgba(63, 81, 181, 0.88) 100%);
+            animation: chargePulse 2.2s ease-in-out infinite;
+        }
+        @keyframes chargePulse {
+            0%, 100% { transform: scale(0.88); opacity: 0.6; }
+            50% { transform: scale(1.12); opacity: 1; }
+        }
+        .inductor-coil {
+            width: 74px;
+            height: 74px;
+            border-radius: 4px;
+            margin: 0 auto;
+            background: linear-gradient(90deg, #8b5cf6 0%, #a78bfa 50%, #8b5cf6 100%);
+            animation: lagPulse 2.6s ease-in-out infinite;
+            position: relative;
+        }
+        @keyframes lagPulse {
+            0%, 100% { transform: scaleY(0.8) translateY(4px); opacity: 0.5; }
+            50% { transform: scaleY(1.2) translateY(-4px); opacity: 1; }
+        }
+        .diode-arrow {
+            display: inline-block;
+            font-size: 54px;
+            animation: diodeBlink 1.5s ease-in-out infinite;
+        }
+        @keyframes diodeBlink {
+            0%, 100% { opacity: 0.2; transform: translateX(-2px); }
+            50% { opacity: 1; transform: translateX(2px); }
+        }
+        .zener-cap {
+            width: 74px;
+            height: 74px;
+            border-radius: 50%;
+            margin: 0 auto;
+            background: radial-gradient(circle at 35% 35%, rgba(255, 200, 100, 1), rgba(255, 165, 0, 0.92) 32%, rgba(255, 100, 0, 0.95) 62%, rgba(200, 50, 0, 0.88) 100%);
+            animation: clampPulse 2.0s ease-in-out infinite;
+            box-shadow: inset 0 0 15px rgba(100, 50, 0, 0.3);
+        }
+        @keyframes clampPulse {
+            0% { transform: scale(0.8); }
+            50% { transform: scale(1.0); }
+            100% { transform: scale(1.0); }
+        }
+        .transistor-gate {
+            width: 74px;
+            height: 74px;
+            border-radius: 8px;
+            margin: 0 auto;
+            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+            animation: switchBlink 1.0s step-start infinite;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            color: white;
+            font-weight: bold;
+        }
+        @keyframes switchBlink {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 1; }
+        }
         .insight-card {
             background: rgba(255, 255, 255, 0.94);
             border-radius: 16px;
@@ -154,42 +314,33 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# ============================================================================
-# TITLE AND HEADER
-# ============================================================================
+st.write("🔥 NEW VERSION LOADED")
+
 st.title("⚡ PWM Signal Simulator Dashboard")
+st.markdown("### 🚀 Version: v2.2 (Deployment Fix Applied)")
 st.markdown("---")
-st.markdown(
-    "Adjust the duty cycle and frequency to simulate PWM signals and observe their effects on LED brightness and motor speed."
-)
+st.markdown("Adjust the duty cycle and frequency to simulate PWM signals and observe their effects on LED brightness and motor speed.")
 
-
-# ============================================================================
-# INPUT SECTION - Sidebar Controls
-# ============================================================================
-st.sidebar.header("🎚️ PWM Controls")
-st.sidebar.markdown("---")
-
-# === NEW FEATURE START ===
-# IMPROVED: Define preset options with descriptive comments
-preset_options = {
-    "Eco": 25,        # Energy-saving mode (25% power)
-    "Normal": 50,     # Balanced operation (50% power)
-    "Performance": 85  # High-power mode (85% power)
-}
-
-# CLEANED: Initialize session state safely with defaults
 if "preset_mode" not in st.session_state:
     st.session_state.preset_mode = "Normal"
 if "duty_cycle" not in st.session_state:
-    # IMPROVED: Safe initialization with preset default
-    st.session_state.duty_cycle = preset_options[st.session_state.preset_mode]
+    st.session_state.duty_cycle = 50
+if "comparison_mode" not in st.session_state:
+    st.session_state.comparison_mode = False
+if "comparison_duty_cycle" not in st.session_state:
+    st.session_state.comparison_duty_cycle = 70
 
+st.sidebar.header("🎚️ PWM Controls")
+st.sidebar.markdown("---")
+
+preset_options = {
+    "Eco": 25,
+    "Normal": 50,
+    "Performance": 85
+}
 
 def apply_preset_mode():
-    """Apply selected preset mode by updating duty cycle."""
     st.session_state.duty_cycle = preset_options[st.session_state.preset_mode]
-
 
 preset_mode = st.sidebar.selectbox(
     label="Preset Modes",
@@ -198,40 +349,36 @@ preset_mode = st.sidebar.selectbox(
     on_change=apply_preset_mode,
     help="Choose a quick PWM profile for the duty cycle"
 )
-# === NEW FEATURE END ===
 
-# Duty Cycle Slider
 duty_cycle = st.sidebar.slider(
     label="Duty Cycle (%)",
-    min_value=0,
-    max_value=100,
+    min_value=DUTY_CYCLE_MIN,
+    max_value=DUTY_CYCLE_MAX,
     step=1,
     key="duty_cycle",
     help="Percentage of time the signal is HIGH in one cycle"
 )
 
-# Frequency Input
 frequency = st.sidebar.number_input(
     label="Frequency (Hz)",
-    min_value=1,
-    max_value=10000,
+    min_value=FREQUENCY_MIN,
+    max_value=FREQUENCY_MAX,
     value=1000,
     step=100,
     help="Number of PWM cycles per second"
 )
-# CLEANED: Input is range-validated by Streamlit (min=1, max=10000)
 
-# Time Duration for waveform display
+frequency = int(np.clip(frequency, FREQUENCY_MIN, FREQUENCY_MAX))
+
 time_duration = st.sidebar.slider(
     label="Time Window (ms)",
-    min_value=1,
-    max_value=10,
+    min_value=TIME_DURATION_MIN,
+    max_value=TIME_DURATION_MAX,
     value=5,
     step=1,
     help="Duration of waveform to display"
 )
 
-# === NEW FEATURE START ===
 comparison_mode = st.sidebar.checkbox(
     label="Enable Comparison Mode",
     value=False,
@@ -240,34 +387,90 @@ comparison_mode = st.sidebar.checkbox(
 )
 
 if comparison_mode:
-    # IMPROVED: Safe initialization with default comparison value
-    if "comparison_duty_cycle" not in st.session_state:
-        # Default: offset from current duty cycle, capped at 85%
-        st.session_state.comparison_duty_cycle = min(85, duty_cycle + 20)
-
     comparison_duty_cycle = st.sidebar.slider(
         label="Comparison Duty Cycle (%)",
-        min_value=0,
-        max_value=100,
+        min_value=DUTY_CYCLE_MIN,
+        max_value=DUTY_CYCLE_MAX,
         step=1,
         key="comparison_duty_cycle",
         help="Second PWM setting used for comparison"
     )
 else:
     comparison_duty_cycle = None
-    # CLEANED: Defensive state cleanup when comparison mode is disabled
-    if "comparison_duty_cycle" in st.session_state:
-        del st.session_state.comparison_duty_cycle
-# === NEW FEATURE END ===
 
-# IMPROVED: Device selection for the application simulation panel
-# CLEANED: Pre-calculate animations to avoid redundancy when device changes
 selected_device = st.sidebar.selectbox(
     label="Device",
-    options=["LED", "Motor", "Buzzer", "Heater"],
+    options=["LED", "Motor", "Buzzer", "Heater", "Capacitor", "Inductor", "Zener Diode", "Diode", "Transistor"],
     index=0,
     help="Choose the device to preview in the simulation panel"
 )
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("⚙️ Device Parameters")
+
+device_params = {}
+
+if selected_device == "Capacitor":
+    device_params["R"] = st.sidebar.slider(
+        "Resistance (Ω)",
+        min_value=100,
+        max_value=10000,
+        value=1000,
+        step=100
+    )
+    device_params["C"] = st.sidebar.slider(
+        "Capacitance (F)",
+        min_value=1e-6,
+        max_value=1e-3,
+        value=1e-4,
+        format="%.6f"
+    )
+elif selected_device == "Inductor":
+    device_params["R"] = st.sidebar.slider(
+        "Resistance (Ω)",
+        min_value=10,
+        max_value=100,
+        value=50,
+        step=5
+    )
+    device_params["L"] = st.sidebar.slider(
+        "Inductance (H)",
+        min_value=1e-3,
+        max_value=10.0,
+        value=0.1,
+        format="%.4f"
+    )
+elif selected_device == "Diode":
+    device_params["Vf"] = st.sidebar.slider(
+        "Forward Voltage (V)",
+        min_value=0.3,
+        max_value=0.9,
+        value=0.7,
+        step=0.05
+    )
+elif selected_device == "Zener Diode":
+    device_params["Vz"] = st.sidebar.slider(
+        "Zener Voltage (V)",
+        min_value=2.4,
+        max_value=12.0,
+        value=5.1,
+        step=0.3
+    )
+elif selected_device == "Transistor":
+    device_params["Vth"] = st.sidebar.slider(
+        "Threshold Voltage (V)",
+        min_value=0.5,
+        max_value=1.2,
+        value=0.7,
+        step=0.05
+    )
+    device_params["Vsat"] = st.sidebar.slider(
+        "Saturation Voltage (V)",
+        min_value=0.1,
+        max_value=0.3,
+        value=0.2,
+        step=0.05
+    )
 
 st.sidebar.markdown("---")
 st.sidebar.info(
@@ -278,103 +481,40 @@ st.sidebar.info(
 )
 
 
-# ============================================================================
-# PROCESSING SECTION - PWM Waveform Generation
-# ============================================================================
-@st.cache_data
 def generate_pwm_signal(duty_cycle, frequency, time_duration_ms):
-    """
-    Generate a PWM (Pulse Width Modulation) square waveform.
+    """Generate a PWM square waveform scaled to 0-5V."""
+    duty_cycle = np.clip(duty_cycle, DUTY_CYCLE_MIN, DUTY_CYCLE_MAX)
+    frequency = max(FREQUENCY_MIN, min(int(frequency), FREQUENCY_MAX))
+    time_duration_ms = max(TIME_DURATION_MIN, time_duration_ms)
     
-    This function generates vectorized PWM signals scaled to real voltage (0-5V).
-    Results are cached for performance optimization.
-    
-    Parameters:
-    -----------
-    duty_cycle : int (0-100)
-        Percentage of the cycle where signal is HIGH (must be 0-100)
-    frequency : int (1-10000)
-        Frequency of the PWM signal in Hz (validated internally)
-    time_duration_ms : float
-        Duration of the signal in milliseconds (must be positive)
-    
-    Returns:
-    --------
-    time_array : ndarray
-        Array of time values in milliseconds
-    signal_array : ndarray
-        Array of PWM signal values scaled to 0-5V range using VMAX constant
-        
-    Notes:
-    ------
-    - Uses vectorized NumPy operations for 20-40x performance improvement
-    - Includes input validation to prevent edge cases (frequency <= 0)
-    - Adaptive sampling based on frequency for optimal quality/performance balance
-    - Signal scaled using module-level VMAX constant for consistency
-    """
-    # SAFETY: Validate frequency input to prevent mathematical errors
     if frequency <= 0:
-        frequency = 1000  # Default to 1kHz if invalid
+        frequency = 1000
     
-    # CLEANED: Calculate period once (in seconds) for reuse
-    period = 1 / frequency
+    period = 1.0 / frequency
+    time_duration_sec = time_duration_ms / 1000.0
     
-    # CLEANED: Convert time duration to seconds for calculation
-    time_duration_sec = time_duration_ms / 1000
-    
-    # IMPROVED: Adaptive sampling based on frequency (better performance at high frequencies)
-    # Higher frequency = fewer samples needed; lower frequency = more samples for clarity
     samples_per_cycle = min(200, max(50, int(2000 / frequency)))
     num_cycles = frequency * time_duration_sec
-    # FIX: Ensure total_samples is never zero
     total_samples = max(1, int(samples_per_cycle * num_cycles))
+    
     time_array = np.linspace(0, time_duration_sec, total_samples)
+    high_time = (duty_cycle / 100.0) * period
     
-    # Calculate high time based on duty cycle
-    high_time = (duty_cycle / 100) * period
-    
-    # IMPROVED: Vectorized NumPy operation (20-40x faster than list comprehension)
     phase = np.mod(time_array, period)
-    signal_normalized = (phase < high_time).astype(int)
-    
-    # Scale to real voltage (0-5V instead of 0-1)
-    # IMPROVED: Use module-level constant for consistency
+    signal_normalized = (phase < high_time).astype(np.float64)
     signal_array = signal_normalized * VMAX
     
-    return time_array * 1000, signal_array  # Return time in milliseconds
+    return time_array * 1000.0, signal_array
 
 
 def calculate_led_brightness(duty_cycle):
-    """
-    Calculate LED brightness based on duty cycle.
-    
-    Parameters:
-    -----------
-    duty_cycle : int (0-100)
-        Percentage of the cycle where signal is HIGH
-    
-    Returns:
-    --------
-    brightness : float
-        LED brightness as a percentage (same as duty cycle)
-    """
-    return duty_cycle
+    """Calculate LED brightness percentage."""
+    return int(np.clip(duty_cycle, DUTY_CYCLE_MIN, DUTY_CYCLE_MAX))
 
 
 def calculate_motor_speed(duty_cycle):
-    """
-    Determine motor speed category based on duty cycle.
-    
-    Parameters:
-    -----------
-    duty_cycle : int (0-100)
-        Percentage of the cycle where signal is HIGH
-    
-    Returns:
-    --------
-    speed_category : str
-        Motor speed category: "OFF", "Low", "Medium", or "High"
-    """
+    """Determine motor speed category."""
+    duty_cycle = np.clip(duty_cycle, DUTY_CYCLE_MIN, DUTY_CYCLE_MAX)
     if duty_cycle == 0:
         return "OFF"
     elif duty_cycle < 33:
@@ -386,19 +526,7 @@ def calculate_motor_speed(duty_cycle):
 
 
 def get_motor_color(speed_category):
-    """
-    Get color for motor speed indicator.
-    
-    Parameters:
-    -----------
-    speed_category : str
-        Motor speed category
-    
-    Returns:
-    --------
-    color : str
-        Hex color code
-    """
+    """Get color for motor speed indicator."""
     color_map = {
         "OFF": "#808080",
         "Low": "#3498db",
@@ -409,19 +537,8 @@ def get_motor_color(speed_category):
 
 
 def calculate_buzzer_status(duty_cycle):
-    """
-    Determine buzzer sound level based on duty cycle.
-    
-    Parameters:
-    -----------
-    duty_cycle : int (0-100)
-        Percentage of the cycle where signal is HIGH
-    
-    Returns:
-    --------
-    status : str
-        Buzzer status: "Silent", "Low Sound", or "Loud Sound"
-    """
+    """Determine buzzer sound level."""
+    duty_cycle = np.clip(duty_cycle, DUTY_CYCLE_MIN, DUTY_CYCLE_MAX)
     if duty_cycle == 0:
         return "Silent"
     elif duty_cycle < 50:
@@ -431,19 +548,8 @@ def calculate_buzzer_status(duty_cycle):
 
 
 def calculate_heater_status(duty_cycle):
-    """
-    Determine heater temperature state based on duty cycle.
-    
-    Parameters:
-    -----------
-    duty_cycle : int (0-100)
-        Percentage of the cycle where signal is HIGH
-    
-    Returns:
-    --------
-    state : str
-        Heater state: "OFF", "Warm", or "Hot"
-    """
+    """Determine heater temperature state."""
+    duty_cycle = np.clip(duty_cycle, DUTY_CYCLE_MIN, DUTY_CYCLE_MAX)
     if duty_cycle == 0:
         return "OFF"
     elif duty_cycle < 50:
@@ -452,22 +558,13 @@ def calculate_heater_status(duty_cycle):
         return "Hot"
 
 
-def get_device_display(device, duty_cycle):
-    """
-    Build the display content for the selected application device.
+def get_device_display(device, duty_cycle, device_params=None):
+    """Build the display content for the selected application device."""
+    if device_params is None:
+        device_params = {}
     
-    Parameters:
-    -----------
-    device : str
-        Selected device type: "LED", "Motor", "Buzzer", or "Heater"
-    duty_cycle : int (0-100)
-        Current PWM duty cycle percentage
+    duty_cycle = np.clip(duty_cycle, DUTY_CYCLE_MIN, DUTY_CYCLE_MAX)
     
-    Returns:
-    --------
-    display_dict : dict
-        Dictionary containing title, value, subtitle, styling, and colors
-    """
     if device == "LED":
         return {
             "title": "💡 LED Brightness",
@@ -502,7 +599,7 @@ def get_device_display(device, duty_cycle):
             "value_color": "white",
             "text_color": "white"
         }
-    else:
+    elif device == "Heater":
         heater_status = calculate_heater_status(duty_cycle)
         heater_color = {
             "OFF": "#808080",
@@ -517,78 +614,152 @@ def get_device_display(device, duty_cycle):
             "value_color": "white",
             "text_color": "white"
         }
+    elif device == "Capacitor":
+        R = device_params.get("R", 1000)
+        C = device_params.get("C", 1e-4)
+        tau = R * C
+        return {
+            "title": "⚡ Capacitor (RC)",
+            "value": f"τ={tau:.4f}s",
+            "subtitle": "Time Constant",
+            "background": "rgba(102, 126, 234, 0.2)",
+            "value_color": "#667eea",
+            "text_color": "#555"
+        }
+    elif device == "Inductor":
+        L = device_params.get("L", 0.1)
+        return {
+            "title": "🔌 Inductor",
+            "value": f"L={L:.3f}H",
+            "subtitle": "Current Lag",
+            "background": "rgba(139, 92, 246, 0.2)",
+            "value_color": "#8b5cf6",
+            "text_color": "#555"
+        }
+    elif device == "Diode":
+        Vf = device_params.get("Vf", 0.7)
+        return {
+            "title": "📍 Diode",
+            "value": f"Vf={Vf:.2f}V",
+            "subtitle": "Forward Voltage",
+            "background": "rgba(34, 197, 94, 0.2)",
+            "value_color": "#22c55e",
+            "text_color": "#555"
+        }
+    elif device == "Zener Diode":
+        Vz = device_params.get("Vz", 5.1)
+        return {
+            "title": "🔒 Zener Diode",
+            "value": f"Vz={Vz:.2f}V",
+            "subtitle": "Regulated Voltage",
+            "background": "rgba(249, 115, 22, 0.2)",
+            "value_color": "#f97316",
+            "text_color": "#555"
+        }
+    else:
+        Vth = device_params.get("Vth", 0.7)
+        return {
+            "title": "⚙️ Transistor",
+            "value": f"Vth={Vth:.2f}V",
+            "subtitle": "Threshold",
+            "background": "rgba(34, 197, 94, 0.2)",
+            "value_color": "#22c55e",
+            "text_color": "#555"
+        }
 
 
-def get_smart_insight(duty_cycle):
-    """
-    Return a dynamic insight message based on the duty cycle.
+def get_smart_insight(device, duty_cycle, device_params=None):
+    """Return a dynamic insight message based on the device and parameters."""
+    if device_params is None:
+        device_params = {}
     
-    Parameters:
-    -----------
-    duty_cycle : int (0-100)
-        Current PWM duty cycle percentage
+    duty_cycle = np.clip(duty_cycle, DUTY_CYCLE_MIN, DUTY_CYCLE_MAX)
     
-    Returns:
-    --------
-    insight : tuple
-        Tuple of (label, message, color_hex) for UI display
-    """
-    if duty_cycle < 30:
+    if device == "Capacitor":
+        R = device_params.get("R", 1000)
+        C = device_params.get("C", 1e-4)
+        tau = R * C
         return (
-            "Energy Saving",
-            "Energy-saving mode is active. Power draw stays low and efficient.",
-            "#2ecc71"
+            "RC Smoothing",
+            f"PWM is being smoothed into DC using RC time constant τ = {tau:.6f}s. Increase tau to reduce ripple and harmonics.",
+            "#667eea"
         )
-    elif duty_cycle <= 70:
+    elif device == "Inductor":
         return (
-            "Balanced",
-            "Balanced operating range. Output and efficiency are staying in a healthy middle zone.",
-            "#f39c12"
+            "RL Filtering",
+            "Current ripple is reduced due to inductive smoothing. Higher L = slower response, smoother current draw.",
+            "#8b5cf6"
+        )
+    elif device == "Diode":
+        Vf = device_params.get("Vf", 0.7)
+        return (
+            "Rectification",
+            f"One-way conduction with forward drop Vf = {Vf:.2f}V. Only half-wave passes through.",
+            "#22c55e"
+        )
+    elif device == "Zener Diode":
+        Vz = device_params.get("Vz", 5.1)
+        return (
+            "Voltage Clamping",
+            f"Voltage is clamped to safe breakdown level Vz = {Vz:.2f}V. Ideal for overvoltage protection.",
+            "#f97316"
+        )
+    elif device == "Transistor":
+        Vth = device_params.get("Vth", 0.7)
+        return (
+            "Digital Switching",
+            f"Operating as a digital switch with threshold Vth = {Vth:.2f}V. Sharp ON/OFF behavior.",
+            "#22c55e"
+        )
+    elif device == "Motor":
+        return (
+            "Current Smoothing",
+            "Mechanical inertia and back-EMF smooth motor response. Higher frequency = smoother rotation.",
+            "#ff6b6b"
+        )
+    elif device == "Heater":
+        return (
+            "Thermal Response",
+            "Heat dissipation smooths thermal response. Long time constant filters rapid PWM changes.",
+            "#ffa500"
         )
     else:
-        return (
-            "High Power Warning",
-            "High-power region reached. Expect stronger output, more heat, and higher energy usage.",
-            "#e74c3c"
-        )
+        if duty_cycle < 30:
+            return ("Energy Saving", "Energy-saving mode is active. Power draw stays low and efficient.", "#2ecc71")
+        elif duty_cycle <= 70:
+            return ("Balanced", "Balanced operating range. Output and efficiency are in a healthy middle zone.", "#f39c12")
+        else:
+            return ("High Power Warning", "High-power region reached. Expect stronger output, more heat, and higher energy usage.", "#e74c3c")
 
 
-# Generate PWM signal
 time_array, signal_array = generate_pwm_signal(duty_cycle, frequency, time_duration)
-
-# IMPROVED: Calculate all real-world parameters in one section
+device_output = process_device_signal(selected_device, signal_array, time_array, device_params)
 led_brightness = calculate_led_brightness(duty_cycle)
 motor_speed = calculate_motor_speed(duty_cycle)
 motor_color = get_motor_color(motor_speed)
-device_display = get_device_display(selected_device, duty_cycle)
-insight_label, insight_text, insight_color = get_smart_insight(duty_cycle)
-
-# IMPROVED: Pre-calculate motor animation speed to avoid redundant computation
-motor_animation_speed = max(0.5, 3 - duty_cycle / 50)
+device_display = get_device_display(selected_device, duty_cycle, device_params)
+insight_label, insight_text, insight_color = get_smart_insight(selected_device, duty_cycle, device_params)
+motor_animation_speed = max(0.5, 3.0 - duty_cycle / 50.0)
 
 
-# ============================================================================
-# OUTPUT SECTION - Visualizations and Metrics
-# ============================================================================
-
-# Create two main columns
 col1, col2 = st.columns([2, 1], gap="large")
 
-# ===== COLUMN 1: Waveform Visualization =====
 with col1:
     st.subheader("📊 PWM Waveform")
     
-    # Create figure with Matplotlib
     fig, ax = plt.subplots(figsize=(12, 4), dpi=100)
     
-    # === PWM GRAPH FIX START ===
-    # Plot PWM signal with step-style transitions for proper square wave visualization
-    # Note: signal_array is now in voltage scale (0-5V) from generate_pwm_signal
-    ax.step(time_array, signal_array, linewidth=2, color="#667eea", label="PWM Signal", where='post')
+    ax.step(time_array, signal_array, linewidth=2, color="#667eea", label="VIN (PWM Signal)", where='post')
     ax.fill_between(time_array, 0, signal_array, alpha=0.3, color="#667eea", step='post')
-    # === PWM GRAPH FIX END ===
     
-    # Styling
+    if device_output is not None and not np.array_equal(device_output, signal_array):
+        if selected_device in ["Capacitor", "Inductor", "Motor", "Heater"]:
+            ax.plot(time_array, device_output, linewidth=2, color="#e74c3c", label="VOUT (Device Output)", linestyle='-')
+            ax.fill_between(time_array, 0, device_output, alpha=0.15, color="#e74c3c')
+        else:
+            ax.step(time_array, device_output, linewidth=2, color="#e74c3c", label="VOUT (Device Output)", where='post')
+            ax.fill_between(time_array, 0, device_output, alpha=0.15, color="#e74c3c', step='post')
+    
     ax.set_xlabel("Time (ms)", fontsize=12, fontweight="bold")
     ax.set_ylabel("Voltage (V)", fontsize=12, fontweight="bold")
     ax.set_ylim(-0.5, 5.5)
@@ -597,7 +768,6 @@ with col1:
     ax.grid(True, alpha=0.3, linestyle="--")
     ax.legend(loc="upper right", fontsize=10)
     
-    # Add annotations for duty cycle
     ax.text(0.5, 1.15, f"Duty Cycle: {duty_cycle}% | Frequency: {frequency} Hz",
             transform=ax.transAxes, fontsize=11, fontweight="bold",
             ha="center", bbox=dict(boxstyle="round", facecolor="#667eea", alpha=0.7, edgecolor="none"),
@@ -607,12 +777,10 @@ with col1:
     st.pyplot(fig, use_container_width=True)
 
 
-# ===== COLUMN 2: Metrics and Indicators =====
 with col2:
     st.subheader("📈 Real-World Effects")
     st.markdown("")
-
-    # MODIFIED: Dynamic application simulation display based on selected device
+    
     st.markdown(f"#### {device_display['title']}")
     device_html = f"""
     <div style="background-color: {device_display['background']}; padding: 30px; border-radius: 10px; text-align: center; color: {device_display['value_color']};">
@@ -621,17 +789,14 @@ with col2:
     </div>
     """
     st.markdown(device_html, unsafe_allow_html=True)
-
-    # === NEW FEATURE START ===
+    
     st.markdown("#### Animated Device Preview")
-
-    # CLEANED: Cache calculated values to reduce redundant computation
-    led_intensity = max(0.18, duty_cycle / 100)
-    buzzer_pulse_speed = max(0.55, 1.7 - (duty_cycle / 120))
+    
+    led_intensity = max(0.18, duty_cycle / 100.0)
+    buzzer_pulse_speed = max(0.55, 1.7 - (duty_cycle / 120.0))
     heat_bar_height = max(22, int(28 + (duty_cycle * 0.55)))
-    heat_overlay_alpha = 0.28 + (duty_cycle / 180)
-    # IMPROVED: motor_animation_speed already calculated above to avoid redundancy
-
+    heat_overlay_alpha = 0.28 + (duty_cycle / 180.0)
+    
     if selected_device == "LED":
         st.markdown(
             f"""
@@ -646,7 +811,6 @@ with col2:
             unsafe_allow_html=True
         )
     elif selected_device == "Motor":
-        # REUSED: motor_animation_speed calculated above for consistency
         st.markdown(
             f"""
             <div class="feature-card">
@@ -679,7 +843,7 @@ with col2:
             """,
             unsafe_allow_html=True
         )
-    else:
+    elif selected_device == "Heater":
         st.markdown(
             f"""
             <div class="feature-card">
@@ -698,16 +862,81 @@ with col2:
             """,
             unsafe_allow_html=True
         )
-    # === NEW FEATURE END ===
+    elif selected_device == "Capacitor":
+        charge_intensity = max(0.2, duty_cycle / 100.0)
+        st.markdown(
+            f"""
+            <div class="feature-card">
+                <div class="feature-title">Capacitor Charging</div>
+                <div style="display:flex; justify-content:center; align-items:center; min-height:94px;">
+                    <div class="capacitor-orb" style="opacity:{charge_intensity}; box-shadow: 0 0 {15 + duty_cycle * 1.5}px rgba(102, 126, 234, {0.2 + duty_cycle / 140});"></div>
+                </div>
+                <div style="text-align:center; margin-top:10px; color:#5b6472; font-size:13px;">Energy storage smooths voltage response</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    elif selected_device == "Inductor":
+        lag_intensity = max(0.3, (duty_cycle + 30) / 130.0)
+        st.markdown(
+            f"""
+            <div class="feature-card">
+                <div class="feature-title">Inductor Current Lag</div>
+                <div style="display:flex; justify-content:center; align-items:center; min-height:94px;">
+                    <div class="inductor-coil" style="opacity:{lag_intensity}; box-shadow: 0 0 {12 + duty_cycle}px rgba(139, 92, 246, {0.25 + duty_cycle / 150});"></div>
+                </div>
+                <div style="text-align:center; margin-top:10px; color:#5b6472; font-size:13px;">Current lags voltage response</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    elif selected_device == "Diode":
+        diode_glow = max(0.2, duty_cycle / 100.0)
+        st.markdown(
+            f"""
+            <div class="feature-card">
+                <div class="feature-title">Diode Conduction</div>
+                <div style="display:flex; justify-content:center; align-items:center; min-height:94px;">
+                    <div class="diode-arrow" style="opacity:{diode_glow}; text-shadow: 0 0 {10 + duty_cycle}px rgba(34, 197, 94, 0.8);">→</div>
+                </div>
+                <div style="text-align:center; margin-top:10px; color:#5b6472; font-size:13px;">One-way conduction during ON phase</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    elif selected_device == "Zener Diode":
+        clamp_intensity = max(0.2, min(1.0, (duty_cycle + 20) / 100.0))
+        st.markdown(
+            f"""
+            <div class="feature-card">
+                <div class="feature-title">Zener Voltage Clamp</div>
+                <div style="display:flex; justify-content:center; align-items:center; min-height:94px;">
+                    <div class="zener-cap" style="opacity:{clamp_intensity}; box-shadow: 0 0 {10 + duty_cycle * 0.8}px rgba(249, 115, 22, {0.3 + duty_cycle / 170});"></div>
+                </div>
+                <div style="text-align:center; margin-top:10px; color:#5b6472; font-size:13px;">Regulates voltage to breakdown level</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    else:
+        switch_speed = max(0.8, 1.2 - duty_cycle / 150.0)
+        st.markdown(
+            f"""
+            <div class="feature-card">
+                <div class="feature-title">Transistor Switch</div>
+                <div style="display:flex; justify-content:center; align-items:center; min-height:94px;">
+                    <div class="transistor-gate" style="animation-duration:{switch_speed:.2f}s;">ON</div>
+                </div>
+                <div style="text-align:center; margin-top:10px; color:#5b6472; font-size:13px;">Sharp digital switching behavior</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
 
-# ============================================================================
-# DETAILED METRICS SECTION
-# ============================================================================
 st.markdown("---")
 st.subheader("📋 Detailed PWM Parameters")
 
-# Create metrics in three columns
 metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
 
 with metric_col1:
@@ -718,33 +947,24 @@ with metric_col1:
     )
 
 with metric_col2:
-    period_ms = (1 / frequency) * 1000
-    st.metric(
-        label="Period",
-        value=f"{period_ms:.3f} ms"
-    )
+    period_ms = (1.0 / frequency) * 1000
+    st.metric(label="Period", value=f"{period_ms:.3f} ms")
 
 with metric_col3:
-    high_time_ms = (duty_cycle / 100) * (1 / frequency) * 1000
-    st.metric(
-        label="HIGH Time",
-        value=f"{high_time_ms:.3f} ms"
-    )
+    high_time_ms = (duty_cycle / 100.0) * (1.0 / frequency) * 1000
+    st.metric(label="HIGH Time", value=f"{high_time_ms:.3f} ms")
 
 with metric_col4:
-    low_time_ms = ((100 - duty_cycle) / 100) * (1 / frequency) * 1000
-    st.metric(
-        label="LOW Time",
-        value=f"{low_time_ms:.3f} ms"
-    )
+    low_time_ms = ((100 - duty_cycle) / 100.0) * (1.0 / frequency) * 1000
+    st.metric(label="LOW Time", value=f"{low_time_ms:.3f} ms")
 
 
-# === NEW FEATURE START ===
 st.markdown("---")
 st.subheader("🧠 Smart Insight")
 
 comparison_note = ""
 if comparison_mode and comparison_duty_cycle is not None:
+    comparison_duty_cycle = int(np.clip(comparison_duty_cycle, DUTY_CYCLE_MIN, DUTY_CYCLE_MAX))
     if comparison_duty_cycle > duty_cycle:
         comparison_note = f"The comparison PWM setting is {comparison_duty_cycle - duty_cycle}% higher than the current duty cycle."
     elif comparison_duty_cycle < duty_cycle:
@@ -763,128 +983,190 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-# === NEW FEATURE END ===
 
 
-# === AI FEATURE START ===
-# Smart Recommendation System
 st.markdown("---")
 st.subheader("💡 Smart Recommendation System")
 
-# Determine recommendation based on duty cycle
-if duty_cycle < 30:
+if selected_device == "Capacitor":
     st.info(
-        """🟢 **Energy Saving Mode**
+        """💡 **RC Filter Optimization**
         
-        Your PWM is set to a low duty cycle. This is ideal for:
-        - Battery-powered applications
-        - Reducing heat generation
-        - Extending device lifespan
-        - Energy-efficient operation
+- Increase R or C to reduce ripple
+- Trade-off: Higher RC = slower response
+- Typical: τ = 1-100ms for audio filtering
+- Choose values based on cutoff frequency: f_c = 1/(2πRC)
         """
     )
-elif 30 <= duty_cycle <= 70:
+elif selected_device == "Inductor":
     st.info(
-        """🟡 **Balanced Performance**
+        """💡 **RL Filter Optimization**
         
-        Your PWM is in the optimal range for:
-        - Smooth motor operation
-        - Reliable LED brightness control
-        - Balanced power consumption
-        - Safe long-term operation
+- Increase L to smooth current transients
+- Higher frequency = less ripple needed
+- Typical: L = 1-100mH for power supplies
+- Watch for ringing at high switching rates
         """
     )
-else:  # duty_cycle > 70
-    st.warning(
-        """🔴 **High Power Mode**
+elif selected_device == "Zener Diode":
+    st.info(
+        """💡 **Voltage Regulation Tips**
         
-        Your PWM is set to high power. Be aware:
-        - Increased power consumption
-        - Heat generation may increase
-        - Ensure adequate cooling/ventilation
-        - Consider reducing duty cycle for sustained use
+- Ensure Zener rating is less than supply voltage
+- Add series resistor to limit current
+- Typical Zener: 3.3V, 5V, 12V
+- Use in parallel with load for regulation
         """
     )
-# === AI FEATURE END ===
+elif selected_device == "Transistor":
+    st.info(
+        """💡 **Switch Optimization**
+        
+- Ensure base/gate threshold voltage is met
+- Use PWM frequency > 20kHz to avoid audible noise
+- Provide adequate base current for saturation
+- Add protection diodes for inductive loads
+        """
+    )
+elif selected_device == "Motor":
+    st.info(
+        """💡 **Motor Control Tips**
+        
+- Use higher frequency for smoother rotation (>2kHz)
+- Lower frequency = cogging/jerking
+- Add flywheel diode to protect circuit
+- Monitor current for stall conditions
+        """
+    )
+elif selected_device == "Heater":
+    st.info(
+        """💡 **Thermal Management**
+        
+- Use low frequency for thermal smoothing
+- Monitor temperature limits
+- Add thermal cutoff protection
+- Consider duty cycle ramps for safety
+        """
+    )
+else:
+    if duty_cycle < 30:
+        st.info(
+            """🟢 **Energy Saving Mode**
+            
+Your PWM is set to a low duty cycle. This is ideal for:
+- Battery-powered applications
+- Reducing heat generation
+- Extending device lifespan
+- Energy-efficient operation
+            """
+        )
+    elif 30 <= duty_cycle <= 70:
+        st.info(
+            """🟡 **Balanced Performance**
+            
+Your PWM is in the optimal range for:
+- Smooth operation
+- Reliable control
+- Balanced power consumption
+- Safe long-term operation
+            """
+        )
+    else:
+        st.warning(
+            """🔴 **High Power Mode**
+            
+Your PWM is set to high power. Be aware:
+- Increased power consumption
+- Heat generation may increase
+- Ensure adequate cooling/ventilation
+- Consider reducing duty cycle for sustained use
+            """
+        )
 
 
-# ============================================================================
-# INTERACTIVE INFO SECTION
-# ============================================================================
 st.markdown("---")
 
-# Information panels
 info_col1, info_col2 = st.columns(2)
 
 with info_col1:
     st.info(
         """
-        **What is PWM?**
-        
-        PWM (Pulse Width Modulation) is a technique to encode information in the duty cycle of a square wave. 
-        It's commonly used to:
-        - Control LED brightness
-        - Adjust motor speed
-        - Regulate power supply
-        - Generate analog signals from digital circuits
+**What is PWM?**
+
+PWM (Pulse Width Modulation) is a technique to encode information in the duty cycle of a square wave. 
+It's commonly used to:
+- Control LED brightness
+- Adjust motor speed
+- Regulate power supply
+- Generate analog signals from digital circuits
         """
     )
 
 with info_col2:
     st.success(
         """
-        **Current Configuration:**
-        
-        - **Duty Cycle:** Controls the ratio of ON time to total cycle time
-        - **Frequency:** Determines how many cycles occur per second
-        - **Application:** Higher frequency = smoother motor operation; Higher duty cycle = more power
+**Current Configuration:**
+
+- **Duty Cycle:** Controls the ratio of ON time to total cycle time
+- **Frequency:** Determines how many cycles occur per second
+- **Application:** Higher frequency = smoother motor operation; Higher duty cycle = more power
         """
     )
 
 
-# === NEW FEATURE START ===
 with st.expander("📘 Learn PWM in 60 seconds", expanded=False):
     st.markdown(
         """
-        PWM, or Pulse Width Modulation, controls average power by changing how long a signal stays HIGH within each cycle.
+PWM, or Pulse Width Modulation, controls average power by changing how long a signal stays HIGH within each cycle.
 
-        - Low duty cycle means short ON time and low average power.
-        - Mid-range duty cycle gives a balanced output.
-        - High duty cycle delivers more power, brightness, or speed, depending on the device.
+- Low duty cycle means short ON time and low average power.
+- Mid-range duty cycle gives a balanced output.
+- High duty cycle delivers more power, brightness, or speed, depending on the device.
 
-        In this dashboard, the waveform stays digital, but the effect looks analog because the duty cycle changes the energy delivered over time.
+In this dashboard, the waveform stays digital, but the effect looks analog because the duty cycle changes the energy delivered over time.
         """
     )
-# === NEW FEATURE END ===
 
 
-# ============================================================================
-# ADDITIONAL VISUALIZATION: Signal Statistics
-# ============================================================================
 st.markdown("---")
 st.subheader("📊 Advanced View - Signal Characteristics")
 
-# Create advanced visualization with multiple plots
+avg_voltage = (duty_cycle / 100.0) * VMAX
+
 fig_advanced = go.Figure()
 
-# IMPROVED: Use module-level VMAX constant for consistency
-avg_voltage = (duty_cycle / 100) * VMAX
-
-# === PWM GRAPH FIX START ===
-# Add PWM signal trace with step-style shape for proper square wave visualization
-# Note: signal_array is already scaled to 0-5V from generate_pwm_signal
 fig_advanced.add_trace(go.Scatter(
     x=time_array,
     y=signal_array,
     mode='lines',
-    name='PWM Signal',
+    name='PWM Signal (VIN)',
     line=dict(color='#667eea', width=2, shape='hv'),
     fill='tozeroy',
     fillcolor='rgba(102, 126, 234, 0.3)'
 ))
-# === PWM GRAPH FIX END ===
 
-# FIXED: Add average voltage line at correct voltage scale
+if device_output is not None and not np.array_equal(device_output, signal_array):
+    if selected_device in ["Capacitor", "Inductor", "Motor", "Heater"]:
+        fig_advanced.add_trace(go.Scatter(
+            x=time_array,
+            y=device_output,
+            mode='lines',
+            name='Device Output (VOUT)',
+            line=dict(color='#e74c3c', width=2, shape='linear'),
+            fill='tozeroy',
+            fillcolor='rgba(230, 116, 60, 0.15)'
+        ))
+    else:
+        fig_advanced.add_trace(go.Scatter(
+            x=time_array,
+            y=device_output,
+            mode='lines',
+            name='Device Output (VOUT)',
+            line=dict(color='#e74c3c', width=2, shape='hv'),
+            fill='tozeroy',
+            fillcolor='rgba(230, 116, 60, 0.15)'
+        ))
+
 fig_advanced.add_hline(
     y=avg_voltage,
     line_dash="dash",
@@ -892,7 +1174,6 @@ fig_advanced.add_hline(
     name=f"Average Voltage ({avg_voltage:.2f}V)"
 )
 
-# Update layout
 fig_advanced.update_layout(
     title=f"PWM Signal Analysis - Duty Cycle: {duty_cycle}% | Frequency: {frequency} Hz",
     xaxis_title="Time (ms)",
@@ -905,70 +1186,54 @@ fig_advanced.update_layout(
 st.plotly_chart(fig_advanced, use_container_width=True)
 
 
-# === NEW FEATURE START ===
-# IMPROVED: Add defensive validation for comparison mode
 if comparison_mode and comparison_duty_cycle is not None:
-    # CLEANED: Validate comparison_duty_cycle is within valid range
-    if 0 <= comparison_duty_cycle <= 100:
-        st.markdown("---")
-        st.subheader("🔍 Comparison Mode")
-
-        comparison_time_array, comparison_signal_array = generate_pwm_signal(comparison_duty_cycle, frequency, time_duration)
-        comparison_fig = go.Figure()
-
-        # === PWM GRAPH FIX START ===
-        # Add PWM signal traces with step-style shape for proper square wave visualization
-        comparison_fig.add_trace(go.Scatter(
-            x=time_array,
-            y=signal_array,
-            mode='lines',
-            name=f'Primary ({duty_cycle}%)',
-            line=dict(color='#667eea', width=2, shape='hv'),
-            fill='tozeroy',
-            fillcolor='rgba(102, 126, 234, 0.18)'
-        ))
-
-        comparison_fig.add_trace(go.Scatter(
-            x=comparison_time_array,
-            y=comparison_signal_array,
-            mode='lines',
-            name=f'Comparison ({comparison_duty_cycle}%)',
-            line=dict(color='#e67e22', width=2, dash='dash', shape='hv'),
-            fill='tozeroy',
-            fillcolor='rgba(230, 126, 34, 0.15)'
-        ))
-        # IMPROVED: Correct y-axis range for voltage scale (0-5V)
-        comparison_fig.update_layout(
-            yaxis=dict(range=[-0.5, 5.5])
-        )
-        # === PWM GRAPH FIX END ===
-
-        comparison_fig.update_layout(
-            title=f"PWM Comparison - {duty_cycle}% vs {comparison_duty_cycle}% Duty Cycle",
-            xaxis_title="Time (ms)",
-            yaxis_title="Voltage (V)",
-            hovermode='x unified',
-            height=420,
-            template="plotly_dark"
-        )
-
-        st.plotly_chart(comparison_fig, use_container_width=True)
-
-        # IMPROVED: Display comparison metrics
-        comparison_col1, comparison_col2 = st.columns(2)
-        with comparison_col1:
-            st.metric("Primary Duty Cycle", f"{duty_cycle}%")
-        with comparison_col2:
-            st.metric("Comparison Duty Cycle", f"{comparison_duty_cycle}%")
-    else:
-        # CLEANED: Handle invalid comparison duty cycle
-        st.warning("⚠️ Invalid comparison duty cycle. Please reset comparison mode.")
-# === NEW FEATURE END ===
+    comparison_duty_cycle = int(np.clip(comparison_duty_cycle, DUTY_CYCLE_MIN, DUTY_CYCLE_MAX))
+    
+    st.markdown("---")
+    st.subheader("🔍 Comparison Mode")
+    
+    comparison_time_array, comparison_signal_array = generate_pwm_signal(comparison_duty_cycle, frequency, time_duration)
+    comparison_fig = go.Figure()
+    
+    comparison_fig.add_trace(go.Scatter(
+        x=time_array,
+        y=signal_array,
+        mode='lines',
+        name=f'Primary ({duty_cycle}%)',
+        line=dict(color='#667eea', width=2, shape='hv'),
+        fill='tozeroy',
+        fillcolor='rgba(102, 126, 234, 0.18)'
+    ))
+    
+    comparison_fig.add_trace(go.Scatter(
+        x=comparison_time_array,
+        y=comparison_signal_array,
+        mode='lines',
+        name=f'Comparison ({comparison_duty_cycle}%)',
+        line=dict(color='#e67e22', width=2, dash='dash', shape='hv'),
+        fill='tozeroy',
+        fillcolor='rgba(230, 126, 34, 0.15)'
+    ))
+    
+    comparison_fig.update_layout(
+        title=f"PWM Comparison - {duty_cycle}% vs {comparison_duty_cycle}% Duty Cycle",
+        xaxis_title="Time (ms)",
+        yaxis_title="Voltage (V)",
+        yaxis=dict(range=[-0.5, 5.5]),
+        hovermode='x unified',
+        height=420,
+        template="plotly_dark"
+    )
+    
+    st.plotly_chart(comparison_fig, use_container_width=True)
+    
+    comparison_col1, comparison_col2 = st.columns(2)
+    with comparison_col1:
+        st.metric("Primary Duty Cycle", f"{duty_cycle}%")
+    with comparison_col2:
+        st.metric("Comparison Duty Cycle", f"{comparison_duty_cycle}%")
 
 
-# ============================================================================
-# FOOTER
-# ============================================================================
 st.markdown("---")
 st.markdown(
     """
@@ -981,9 +1246,6 @@ st.markdown(
 )
 
 
-# === AI FEATURE START ===
-# === AI CHAT UPGRADE START ===
-# Enhanced AI Chat Assistant with intelligent keyword-based responses
 st.markdown("---")
 st.subheader("🤖 AI Chat Assistant")
 
@@ -996,13 +1258,12 @@ if user_question:
     question_lower = user_question.lower()
     response = None
     
-    # === PWM CONCEPTS ===
     if any(word in question_lower for word in ["what is pwm", "what does pwm mean"]):
         response = (
             "**PWM (Pulse Width Modulation)** is a technique that controls average power by varying how long a signal "
             "stays ON vs OFF in each cycle. Instead of changing voltage, PWM switches the signal rapidly HIGH and LOW. "
             "The ratio of ON-time to total cycle-time is called the **duty cycle**. Higher duty cycle = more power. "
-            "This is used in your dashboard to control LED brightness, motor speed, buzzer intensity, and heater heat."
+            "This is used in your dashboard to control LED brightness, motor speed, buzzer intensity, heater heat, and more advanced components like RC circuits, inductors, and semiconductor devices."
         )
     
     elif any(word in question_lower for word in ["what is duty", "duty cycle", "duty"]):
@@ -1037,7 +1298,6 @@ if user_question:
             "PWM is the industry standard for power control in embedded systems!"
         )
     
-    # === DEVICES ===
     elif any(word in question_lower for word in ["led", "light", "brightness"]):
         response = (
             "**LED Control with PWM:**\n"
@@ -1084,14 +1344,56 @@ if user_question:
             "Select 'Heater' from the device dropdown to see the animated heat bars showing temperature rise!"
         )
     
-    # === PROJECT-RELATED ===
+    elif any(word in question_lower for word in ["capacitor", "rc"]):
+        response = (
+            "**Capacitor (RC Circuit) with PWM:**\n\n"
+            "**Principle:** A capacitor stores charge and resists voltage changes. Combined with resistance, it creates an RC filter.\n\n"
+            "**Waveform Effect:** The square PWM wave is smoothed into a curved exponential rise/fall. Output approaches input with time constant τ = R×C:\n"
+            "- Higher τ = More smoothing, slower response\n"
+            "- Lower τ = Less smoothing, faster response\n\n"
+            "**Real-World Uses:** Audio filtering, power supply ripple reduction, gate delay circuits, sensor debouncing."
+        )
+    
+    elif any(word in question_lower for word in ["inductor", "rl", "coil"]):
+        response = (
+            "**Inductor (RL Circuit) with PWM:**\n\n"
+            "**Principle:** An inductor resists current changes via back-EMF (Faraday's law). RL circuits create current lag.\n\n"
+            "**Waveform Effect:** Current lags voltage. Output rises/falls slower than input due to inductance L. Higher L = slower response.\n\n"
+            "**Real-World Uses:** Motor control, power supply inductors, current smoothing in LED drivers, energy storage in switch-mode supplies."
+        )
+    
+    elif any(word in question_lower for word in ["diode", "rectif"]):
+        response = (
+            "**Diode with PWM:**\n\n"
+            "**Principle:** A diode conducts only in one direction. Forward bias enables conduction; reverse bias blocks it. Forward voltage drop Vf ≈ 0.7V (silicon).\n\n"
+            "**Waveform Effect:** Output is half-wave rectified. PWM positive half-cycles pass through (minus Vf). Negative cycles are blocked → output = 0V.\n\n"
+            "**Real-World Uses:** Rectification (AC→DC), reverse polarity protection, charge pump circuits, solar panel bypass."
+        )
+    
+    elif any(word in question_lower for word in ["zener", "regulation", "clamp", "regul"]):
+        response = (
+            "**Zener Diode with PWM:**\n\n"
+            "**Principle:** Zener diodes conduct in reverse bias at a precise breakdown voltage Vz. Used for voltage regulation and overvoltage protection.\n\n"
+            "**Waveform Effect:** Output voltage is clamped to Vz. Below Vz, behaves like normal diode. Above Vz, current increases but voltage stays constant → flat-top output.\n\n"
+            "**Real-World Uses:** Voltage regulation, overvoltage protection, reference circuits, transient suppression."
+        )
+    
+    elif any(word in question_lower for word in ["transistor", "switch", "gate", "thresh", "bjt"]):
+        response = (
+            "**Transistor as Switch with PWM:**\n\n"
+            "**Principle:** Transistors operate as digital switches. Base/gate voltage controls collector/drain current. Threshold voltage Vth determines ON/OFF.\n\n"
+            "**Waveform Effect:** Output is rectangular binary: fully ON (near Vcc) or fully OFF (0V). Sharp switching with no linear region when driven hard.\n\n"
+            "**Real-World Uses:** Motor control, relay drivers, LED brightness control, power switching in audio amplifiers and DC-DC converters."
+        )
+    
     elif any(word in question_lower for word in ["what does this", "how does this work"]):
         response = (
             "**Welcome to the PWM Signal Simulator Dashboard!** 📊\n\n"
             "This interactive tool lets you:\n"
             "✓ Adjust duty cycle and frequency with sliders\n"
             "✓ See the PWM waveform change in real-time\n"
-            "✓ Observe how duty cycle affects LED brightness, motor speed, buzzer sound, and heater heat\n"
+            "✓ Observe effects on LED, Motor, Buzzer, Heater, and advanced electronics\n"
+            "✓ Simulate RC circuits, inductors, diodes, Zener diodes, and transistors\n"
             "✓ Compare two different PWM settings side-by-side\n"
             "✓ Use preset modes (Eco, Normal, Performance) for quick setup\n"
             "✓ Get smart recommendations based on your settings\n\n"
@@ -1101,12 +1403,12 @@ if user_question:
     elif any(word in question_lower for word in ["graph", "waveform", "understand the", "plot"]):
         response = (
             "**Understanding the PWM Waveform Graph:**\n\n"
-            "The graph shows the PWM signal over time:\n"
-            "- **Vertical jumps** = Signal switching between LOW (0V) and HIGH (5V)\n"
-            "- **Height of signal** = Voltage level\n"
+            "The graph shows the PWM signal and device response over time:\n"
+            "- **Blue line (VIN)** = Input PWM signal (0-5V square wave)\n"
+            "- **Red line (VOUT)** = Device output (varies by device type)\n"
             "- **Shaded area** = Time the signal is ON\n"
             "- **Duty cycle %** = How much of the cycle is shaded (ON time)\n\n"
-            "The **red dashed line** shows the average voltage, which equals (duty cycle / 100). "
+            "The **red dashed line** shows the average voltage, which equals (duty cycle / 100) × 5V. "
             "For example, at 50% duty cycle, average voltage = 2.5V. This average is what controls your device!"
         )
     
@@ -1117,11 +1419,12 @@ if user_question:
             "- **Wider shaded area** = Higher duty cycle (more ON time)\n"
             "- **Higher red line** = Higher average voltage\n"
             "- **Larger device effect** = More power, more brightness/speed/heat\n\n"
-            "The real-world effects panel shows:\n"
-            "- **LED** gets brighter\n"
-            "- **Motor** spins faster\n"
-            "- **Buzzer** gets louder\n"
-            "- **Heater** gets hotter\n\n"
+            "Different devices respond differently:\n"
+            "- **LED**: Brightness increases proportionally\n"
+            "- **Motor**: Speed increases with higher duty cycle\n"
+            "- **Capacitor/Inductor**: Output smoothness changes based on circuit properties\n"
+            "- **Diode/Zener**: Output is clipped or regulated\n"
+            "- **Transistor**: Digital ON/OFF switching\n\n"
             "This demonstrates how PWM gives you precise analog-like control from a digital signal!"
         )
     
@@ -1139,35 +1442,14 @@ if user_question:
             "This helps you understand the difference between settings!"
         )
     
-    elif "pwm" in question_lower:
-        response = (
-            "**General PWM Info:** \n\n"
-            "Try asking about specific topics:\n"
-            "- 'What is PWM?'\n"
-            "- 'What is duty cycle?'\n"
-            "- 'What is frequency?'\n"
-            "- 'Why use PWM?'\n"
-            "- Device control: 'LED', 'Motor', 'Buzzer', 'Heater'\n"
-            "- 'Comparison mode', 'Preset modes', or 'Graph'!"
-        )
-    
-    # === DEFAULT RESPONSE ===
     else:
         response = (
             "I'm here to help with PWM and this simulation! 🚀\n\n"
             "Try asking about:\n"
             "- **PWM Concepts:** 'What is PWM?', 'What is duty cycle?', 'What is frequency?', 'Why use PWM?'\n"
             "- **Devices:** 'How does LED work?', 'Tell me about motor', 'How does buzzer work?', 'Heater control'\n"
+            "- **Advanced:** 'Capacitor', 'Inductor', 'Diode', 'Zener', 'Transistor'\n"
             "- **Project:** 'What does this dashboard do?', 'How does the graph work?', 'What happens when duty cycle changes?'"
         )
     
-    # Display response
     st.success(f"**🤖 AI Assistant:** {response}")
-# === AI CHAT UPGRADE END ===
-# === AI FEATURE END ===
-
-    
-    # Display response
-    st.success(f"**🤖 AI Assistant:** {response}")
-# === AI CHAT UPGRADE END ===
-# === AI FEATURE END ===
