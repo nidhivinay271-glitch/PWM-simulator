@@ -621,18 +621,15 @@ def simulate_rl_response(time_array_ms, vin, inductance_h, resistance_ohm):
 
 def compute_device_output(device, time_array_ms, signal_array, duty_cycle, params):
     """Compute device-specific response signals."""
-    dt = np.diff(time_array_ms, prepend=time_array_ms[0])
-    if len(dt) > 1:
-        dt[0] = dt[1]
-    dt = np.maximum(dt, 1e-6)
+    dt_ms = _sanitize_time_steps(time_array_ms)
+    dt_s = dt_ms / 1000.0
 
     vin = signal_array
 
     if device == "LED":
         vf = float(params["led_forward_v"])
         r_led = max(1e-6, float(params["led_series_resistance_ohm"]))
-        led_drop = np.where(vin > vf, vin - vf, 0.0)
-        return led_drop * (220.0 / r_led)
+        return np.where(vin > vf, (vin - vf) / r_led, 0.0)
 
     if device == "Capacitor (RC)":
         return simulate_rc_response(
@@ -675,20 +672,41 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
         motor_r = float(params["motor_armature_resistance_ohm"])
         motor_l = float(params["motor_inductance_h"])
         vin_scaled = (vin / VMAX) * motor_supply_v
-        _, v_r, _ = simulate_rl_response(time_array_ms, vin_scaled, motor_l, motor_r)
-        return v_r
+        motor_r = max(1e-6, motor_r)
+        motor_l = max(1e-9, motor_l)
+
+        ke = 0.02
+        ki = 0.02
+        inertia = 0.001
+        damping = 0.001
+
+        current = np.zeros_like(vin_scaled, dtype=float)
+        omega = np.zeros_like(vin_scaled, dtype=float)
+        for i in range(1, len(vin_scaled)):
+            back_emf = ke * omega[i - 1]
+            di = (vin_scaled[i - 1] - motor_r * current[i - 1] - back_emf) / motor_l * dt_s[i]
+            current[i] = current[i - 1] + di
+            torque = ki * current[i - 1]
+            domega = (torque - damping * omega[i - 1]) / inertia * dt_s[i]
+            omega[i] = omega[i - 1] + domega
+
+        return ke * omega
 
     if device == "Buzzer":
         buzzer_v = float(params["buzzer_operating_v"])
         buzzer_gain = float(params["buzzer_gain"])
-        vin_scaled = (vin / VMAX) * buzzer_v
-        return simulate_first_order_response(time_array_ms, vin_scaled * buzzer_gain, params["buzzer_tau_ms"])
+        amplitude = (duty_cycle / 100.0) * buzzer_v * buzzer_gain
+        return np.full_like(vin, amplitude, dtype=float)
 
     if device == "Heater":
         heater_r = max(1e-6, float(params["heater_resistance_ohm"]))
-        heater_inertia_ms = float(params["heater_inertia_ms"])
-        heater_power_proxy = np.clip((vin ** 2) / heater_r, 0.0, VMAX)
-        return simulate_first_order_response(time_array_ms, heater_power_proxy, heater_inertia_ms)
+        tau_s = max(1e-3, float(params["heater_inertia_ms"]) / 1000.0)
+        power = (vin ** 2) / heater_r
+        temp_rise = np.zeros_like(power, dtype=float)
+        for i in range(1, len(power)):
+            dtemp = (power[i - 1] - temp_rise[i - 1]) / tau_s * dt_s[i]
+            temp_rise[i] = temp_rise[i - 1] + dtemp
+        return temp_rise
 
     return vin
 
