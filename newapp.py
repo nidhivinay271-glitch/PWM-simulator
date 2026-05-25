@@ -499,10 +499,17 @@ def simulate_rc_response(time_array_ms, input_signal, resistance_ohm, capacitanc
     return vc
 
 
-def simulate_rl_response(time_array_ms, input_signal, tau_ms):
-    """Simulate RL response using a first-order tau model and return V_R, V_L."""
-    tau_ms = max(0.1, float(tau_ms))
-    v_r = simulate_first_order_response(time_array_ms, input_signal, tau_ms)
+def simulate_rl_response(time_array_ms, input_signal, inductance_h, resistance_ohm):
+    """Simulate RL response using V = L * di/dt and return V_R, V_L."""
+    dt_ms = _sanitize_time_steps(time_array_ms)
+    dt_s = dt_ms / 1000.0
+    inductance_h = max(1e-6, float(inductance_h))
+    resistance_ohm = max(1e-6, float(resistance_ohm))
+    current = np.zeros_like(input_signal, dtype=float)
+    for i in range(1, len(input_signal)):
+        di = (input_signal[i - 1] - current[i - 1] * resistance_ohm) / inductance_h * dt_s[i]
+        current[i] = current[i - 1] + di
+    v_r = current * resistance_ohm
     v_l = input_signal - v_r
     return v_r, v_l
 
@@ -531,7 +538,8 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
         v_r, v_l = simulate_rl_response(
             time_array_ms,
             vin,
-            params["rl_tau_ms"]
+            params["rl_inductance_h"],
+            params["rl_resistance_ohm"]
         )
         return v_l if params["rl_output_mode"] == "Inductor Voltage" else v_r
 
@@ -575,14 +583,13 @@ def compute_device_output_cached(device, time_array_ms, signal_array, duty_cycle
         "rc_capacitance_f": params_tuple[1],
         "rl_inductance_h": params_tuple[2],
         "rl_resistance_ohm": params_tuple[3],
-        "rl_tau_ms": params_tuple[4],
-        "rl_output_mode": params_tuple[5],
-        "diode_drop_v": params_tuple[6],
-        "zener_v": params_tuple[7],
-        "transistor_thresh_v": params_tuple[8],
-        "motor_tau_ms": params_tuple[9],
-        "buzzer_tau_ms": params_tuple[10],
-        "heater_tau_ms": params_tuple[11]
+        "rl_output_mode": params_tuple[4],
+        "diode_drop_v": params_tuple[5],
+        "zener_v": params_tuple[6],
+        "transistor_thresh_v": params_tuple[7],
+        "motor_tau_ms": params_tuple[8],
+        "buzzer_tau_ms": params_tuple[9],
+        "heater_tau_ms": params_tuple[10]
     }
     return compute_device_output(device, time_array_ms, signal_array, duty_cycle, params)
 
@@ -898,7 +905,6 @@ device_params = {
     "rc_capacitance_f": rc_capacitance_uf * 1e-6,
     "rl_inductance_h": rl_inductance_mh / 1000.0,
     "rl_resistance_ohm": rl_resistance_ohm,
-    "rl_tau_ms": (rl_inductance_mh / 1000.0) / max(1e-6, rl_resistance_ohm) * 1000.0,
     "rl_output_mode": rl_output_mode,
     "diode_drop_v": float(np.clip(diode_drop_v, 0.1, 1.2)),
     "zener_v": float(np.clip(zener_v, 2.0, VMAX)),
@@ -912,7 +918,6 @@ device_params_tuple = (
     device_params["rc_capacitance_f"],
     device_params["rl_inductance_h"],
     device_params["rl_resistance_ohm"],
-    device_params["rl_tau_ms"],
     device_params["rl_output_mode"],
     device_params["diode_drop_v"],
     device_params["zener_v"],
