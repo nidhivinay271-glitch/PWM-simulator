@@ -473,8 +473,8 @@ def first_order_response(vin, dt_ms, tau_ms):
     return simulate_first_order_response(time_array_ms, vin, tau_ms)
 
 
-def simulate_rl_response(time_array_ms, input_signal, inductance_h, resistance_ohm, output_mode):
-    """Simulate RL response using L di/dt = Vin - i*R and return selected output."""
+def simulate_rl_response(time_array_ms, input_signal, inductance_h, resistance_ohm):
+    """Simulate RL response using L di/dt = Vin - i*R and return i, V_R, V_L."""
     dt_ms = _sanitize_time_steps(time_array_ms)
     dt_s = dt_ms / 1000.0
     inductance_h = max(1e-6, float(inductance_h))
@@ -485,7 +485,7 @@ def simulate_rl_response(time_array_ms, input_signal, inductance_h, resistance_o
         current[i] = current[i - 1] + di
     v_r = current * resistance_ohm
     v_l = input_signal - v_r
-    return v_l if output_mode == "Inductor Voltage" else v_r
+    return current, v_r, v_l
 
 
 def compute_device_output(device, time_array_ms, signal_array, duty_cycle, params):
@@ -504,13 +504,13 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
         return simulate_first_order_response(time_array_ms, vin, params["rc_tau_ms"])
 
     if device == "Inductor (RL)":
-        return simulate_rl_response(
+        _, v_r, v_l = simulate_rl_response(
             time_array_ms,
             vin,
             params["rl_inductance_h"],
-            params["rl_resistance_ohm"],
-            params["rl_output_mode"]
+            params["rl_resistance_ohm"]
         )
+        return v_l if params["rl_output_mode"] == "Inductor Voltage" else v_r
 
     if device == "Diode":
         vd = float(params["diode_drop_v"])
@@ -900,6 +900,15 @@ device_output = compute_device_output_cached(
     duty_cycle,
     device_params_tuple
 )
+rl_v_r = None
+rl_v_l = None
+if selected_device == "Inductor (RL)":
+    _, rl_v_r, rl_v_l = simulate_rl_response(
+        time_array,
+        signal_array,
+        device_params["rl_inductance_h"],
+        device_params["rl_resistance_ohm"]
+    )
 if DEBUG_VALIDATION:
     debug_validation_block(
         "MAIN",
@@ -941,8 +950,12 @@ with col1:
         ax.step(time_array, signal_array, linewidth=2, color="#667eea", label="PWM Signal", where="post")
         ax.fill_between(time_array, 0, signal_array, alpha=0.3, color="#667eea", step="post")
     if show_device_trace and device_output is not None:
-        ax.plot(time_array, device_output, linewidth=1.5, color="#e74c3c", alpha=0.85, label=f"{selected_device} Output")
-        ax.fill_between(time_array, 0, device_output, alpha=0.12, color="#e74c3c")
+        if selected_device == "Inductor (RL)" and rl_v_r is not None and rl_v_l is not None:
+            ax.plot(time_array, rl_v_r, linewidth=1.5, color="#2b6cb0", alpha=0.9, label="RL V_R")
+            ax.plot(time_array, rl_v_l, linewidth=1.2, color="#e53e3e", alpha=0.85, label="RL V_L")
+        else:
+            ax.plot(time_array, device_output, linewidth=1.5, color="#e74c3c", alpha=0.85, label=f"{selected_device} Output")
+            ax.fill_between(time_array, 0, device_output, alpha=0.12, color="#e74c3c")
     # === PWM GRAPH FIX END ===
     
     # Styling
@@ -1370,9 +1383,21 @@ if comparison_mode and comparison_duty_cycle is not None:
             comparison_duty_cycle,
             device_params_tuple
         )
+        comparison_rl_v_r = None
+        comparison_rl_v_l = None
+        if selected_device == "Inductor (RL)":
+            _, comparison_rl_v_r, comparison_rl_v_l = simulate_rl_response(
+                comparison_time_array,
+                comparison_signal_array,
+                device_params["rl_inductance_h"],
+                device_params["rl_resistance_ohm"]
+            )
         if comparison_time_array.shape != time_array.shape or not np.allclose(comparison_time_array, time_array):
             comparison_signal_array = np.interp(time_array, comparison_time_array, comparison_signal_array)
             comparison_device_output = np.interp(time_array, comparison_time_array, comparison_device_output)
+            if comparison_rl_v_r is not None and comparison_rl_v_l is not None:
+                comparison_rl_v_r = np.interp(time_array, comparison_time_array, comparison_rl_v_r)
+                comparison_rl_v_l = np.interp(time_array, comparison_time_array, comparison_rl_v_l)
             comparison_time_array = time_array
         if DEBUG_VALIDATION:
             debug_validation_block(
@@ -1406,13 +1431,43 @@ if comparison_mode and comparison_duty_cycle is not None:
             fill='tozeroy',
             fillcolor='rgba(230, 126, 34, 0.15)'
         ))
-        comparison_fig.add_trace(go.Scatter(
-            x=comparison_time_array,
-            y=comparison_device_output,
-            mode='lines',
-            name=f'{selected_device} Output',
-            line=dict(color='#ff6f61', width=2, dash='dot')
-        ))
+        if selected_device == "Inductor (RL)" and comparison_rl_v_r is not None and comparison_rl_v_l is not None and rl_v_r is not None and rl_v_l is not None:
+            comparison_fig.add_trace(go.Scatter(
+                x=time_array,
+                y=rl_v_r,
+                mode='lines',
+                name='Primary RL V_R',
+                line=dict(color='#2b6cb0', width=2)
+            ))
+            comparison_fig.add_trace(go.Scatter(
+                x=time_array,
+                y=rl_v_l,
+                mode='lines',
+                name='Primary RL V_L',
+                line=dict(color='#e53e3e', width=1, dash='dot')
+            ))
+            comparison_fig.add_trace(go.Scatter(
+                x=comparison_time_array,
+                y=comparison_rl_v_r,
+                mode='lines',
+                name='Comparison RL V_R',
+                line=dict(color='#63b3ed', width=2, dash='dash')
+            ))
+            comparison_fig.add_trace(go.Scatter(
+                x=comparison_time_array,
+                y=comparison_rl_v_l,
+                mode='lines',
+                name='Comparison RL V_L',
+                line=dict(color='#fc8181', width=1, dash='dot')
+            ))
+        else:
+            comparison_fig.add_trace(go.Scatter(
+                x=comparison_time_array,
+                y=comparison_device_output,
+                mode='lines',
+                name=f'{selected_device} Output',
+                line=dict(color='#ff6f61', width=2, dash='dot')
+            ))
         # IMPROVED: Correct y-axis range for voltage scale (0-5V)
         comparison_fig.update_layout(
             yaxis=dict(range=[-0.5, 5.5])
