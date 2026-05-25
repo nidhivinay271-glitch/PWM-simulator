@@ -252,6 +252,12 @@ show_device_trace = st.sidebar.checkbox(
     help="Toggle device response overlay for clarity"
 )
 
+debug_mode = st.sidebar.checkbox(
+    "Debug Mode",
+    value=False,
+    help="Print cache keys, parameter hashes, dt statistics, and waveform ranges"
+)
+
 # === NEW FEATURE START ===
 comparison_mode = st.sidebar.checkbox(
     label="Enable Comparison Mode",
@@ -391,6 +397,11 @@ st.sidebar.info(
     "- Higher frequency increases motor smoothness\n"
     "- 0% duty cycle turns OFF, 100% turns ON"
 )
+
+if st.sidebar.button("🔄 Reset Simulation Cache"):
+    st.cache_data.clear()
+    st.cache_resource.clear()
+    st.sidebar.success("Simulation cache cleared.")
 
 
 # ============================================================================
@@ -940,9 +951,16 @@ device_output = compute_device_output_cached(
     duty_cycle,
     device_params_tuple
 )
-if DEBUG_VALIDATION and selected_device == "Inductor (RL)":
+if debug_mode and selected_device == "Inductor (RL)":
     print(f"[RL CHECKSUM] main={_checksum_array(device_output)}")
-if DEBUG_VALIDATION:
+if debug_mode:
+    dt_ms = _sanitize_time_steps(time_array)
+    print(f"[CACHE KEY] pwm=({duty_cycle},{frequency},{time_duration})")
+    params_hash = hashlib.md5(repr(device_params_tuple).encode("utf-8")).hexdigest()
+    print(f"[PARAM HASH] device={selected_device} hash={params_hash}")
+    print(f"[DT MS] min={dt_ms.min():.6f}, max={dt_ms.max():.6f}, mean={dt_ms.mean():.6f}")
+    print(f"[PWM RANGE] min={signal_array.min():.3f}, max={signal_array.max():.3f}")
+    print(f"[OUT RANGE] min={device_output.min():.3f}, max={device_output.max():.3f}")
     debug_validation_block(
         "MAIN",
         time_array,
@@ -1372,7 +1390,7 @@ fig_advanced.add_trace(go.Scatter(
     name=f"{selected_device} Output",
     line=dict(color='#e74c3c', width=2)
 ))
-if DEBUG_VALIDATION and selected_device == "Inductor (RL)":
+    if debug_mode and selected_device == "Inductor (RL)":
     print(f"[RL CHECKSUM] advanced={_checksum_array(device_output)}")
 # === PWM GRAPH FIX END ===
 
@@ -1418,9 +1436,9 @@ if comparison_mode and comparison_duty_cycle is not None:
             comparison_signal_array = np.interp(time_array, comparison_time_array, comparison_signal_array)
             comparison_device_output = np.interp(time_array, comparison_time_array, comparison_device_output)
             comparison_time_array = time_array
-        if DEBUG_VALIDATION and selected_device == "Inductor (RL)":
+        if debug_mode and selected_device == "Inductor (RL)":
             print(f"[RL CHECKSUM] comparison={_checksum_array(comparison_device_output)}")
-        if DEBUG_VALIDATION:
+        if debug_mode:
             debug_validation_block(
                 "COMPARISON",
                 time_array,
@@ -1752,4 +1770,5 @@ if user_question:
     st.success(f"**🤖 AI Assistant:** {response}")
 # === AI CHAT UPGRADE END ===
 # === AI FEATURE END ===
+
 
