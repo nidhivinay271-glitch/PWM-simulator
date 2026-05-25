@@ -500,11 +500,16 @@ def simulate_rc_response(time_array_ms, input_signal, resistance_ohm, capacitanc
     return vc
 
 
-def simulate_rl_response(time_array_ms, input_signal, tau_ms):
-    """Simulate RL response using a first-order tau model and return V_R, V_L."""
+def simulate_rl_response(time_array_ms, vin, tau_ms):
+    """Simulate RL response using a tau-based current update and return V_R, V_L."""
     tau_ms = max(0.1, float(tau_ms))
-    v_r = simulate_first_order_response(time_array_ms, input_signal, tau_ms)
-    v_l = input_signal - v_r
+    dt_ms = _sanitize_time_steps(time_array_ms)
+    current = np.zeros_like(vin, dtype=float)
+    for i in range(1, len(vin)):
+        alpha = dt_ms[i] / tau_ms
+        current[i] = current[i - 1] + alpha * (vin[i] - current[i - 1])
+    v_r = current
+    v_l = vin - v_r
     return v_r, v_l
 
 
@@ -1746,3 +1751,4 @@ if user_question:
     st.success(f"**🤖 AI Assistant:** {response}")
 # === AI CHAT UPGRADE END ===
 # === AI FEATURE END ===
+
