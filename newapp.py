@@ -631,14 +631,19 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
         r_led = max(1e-6, float(params["led_series_resistance_ohm"]))
         vt = 0.025
         ideality = 2.0
-        sat_current = 1e-12
+        saturation_current = 1e-12
         led_current = np.zeros_like(vin, dtype=float)
         for i in range(len(vin)):
-            v_prev_i = r_led * led_current[i - 1] if i > 0 else 0.0
-            vd = np.clip(vin[i] - v_prev_i, -20.0, 20.0)
-            diode_i = sat_current * (np.exp(vd / (ideality * vt)) - 1.0)
-            resistor_i = max(0.0, (vin[i] - vf) / r_led)
-            led_current[i] = 0.7 * diode_i + 0.3 * resistor_i
+            v_in = np.clip(vin[i], 0.0, VMAX)
+            I_est = led_current[i - 1] if i > 0 else 0.0
+            for _ in range(8):
+                vd = np.clip(v_in - I_est * r_led, -50.0, 50.0)
+                exp_arg = np.clip((vd - vf) / (ideality * vt), -50.0, 50.0)
+                I_d = np.maximum(saturation_current * (np.exp(exp_arg) - 1.0), 0.0)
+                I_r = np.maximum((v_in - vd) / r_led, 0.0)
+                I_candidate = 0.7 * I_d + 0.3 * I_r
+                I_est = 0.6 * I_est + 0.4 * I_candidate
+            led_current[i] = max(I_est, 0.0)
         return led_current
 
     if device == "Capacitor (RC)":
@@ -679,54 +684,53 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
 
     if device == "Motor":
         motor_supply_v = float(params["motor_supply_v"])
-        motor_r = float(params["motor_armature_resistance_ohm"])
-        motor_l = float(params["motor_inductance_h"])
+        motor_r = max(1e-6, float(params["motor_armature_resistance_ohm"]))
+        motor_l = max(1e-9, float(params["motor_inductance_h"]))
         vin_scaled = (vin / VMAX) * motor_supply_v
-        motor_r = max(1e-6, motor_r)
-        motor_l = max(1e-9, motor_l)
 
         ke = 0.02
-        ki = 0.02
-        inertia = 0.001
-        damping = 0.001
+        kt = 0.02
+        inertia = 0.005
+        damping = 0.005
 
         current = np.zeros_like(vin_scaled, dtype=float)
         omega = np.zeros_like(vin_scaled, dtype=float)
         for i in range(1, len(vin_scaled)):
-            back_emf = ke * omega[i - 1]
-            effective_v = vin_scaled[i] - back_emf
-            effective_v = np.clip(effective_v, -motor_supply_v, motor_supply_v)
             dt = max(dt_s[i], 1e-6)
+            back_emf = ke * omega[i - 1]
+            effective_v = np.clip(vin_scaled[i] - back_emf, -motor_supply_v, motor_supply_v)
             di = (effective_v - motor_r * current[i - 1]) / motor_l * dt
-            current[i] = current[i - 1] + di
-            torque = ki * current[i]
-            domega = (torque - damping * omega[i - 1]) / inertia * dt
+            current[i] = max(current[i - 1] + di, 0.0)
+            domega = (kt * current[i] - damping * omega[i - 1]) / inertia * dt
             omega[i] = max(omega[i - 1] + domega, 0.0)
-
         return omega
 
     if device == "Buzzer":
-        buzzer_v = float(params["buzzer_operating_v"])
         buzzer_gain = float(params["buzzer_gain"])
-        rectified = np.clip(np.abs(vin / max(VMAX, 1e-9)), 0.0, 1.0)
-        envelope = np.zeros_like(rectified, dtype=float)
-        tau_env = 0.03
-        for i in range(1, len(rectified)):
+        x = np.clip(np.abs(vin / VMAX), 0.0, 1.0)
+        envelope = np.zeros_like(x, dtype=float)
+        tau_s = max(1e-6, float(params.get("buzzer_tau_ms", 12.0)) / 1000.0)
+        for i in range(1, len(x)):
             dt = max(dt_s[i], 1e-6)
-            alpha = dt / (tau_env + dt)
-            instantaneous = rectified[i] + 0.1 * (rectified[i] - rectified[i - 1])
+            alpha = dt / (tau_s + dt)
+            ripple = 0.05 * (x[i] - x[i - 1])
+            instantaneous = x[i] + ripple
             envelope[i] = envelope[i - 1] + alpha * (instantaneous - envelope[i - 1])
-        return envelope * buzzer_v * buzzer_gain
+        return envelope * buzzer_gain
 
     if device == "Heater":
         heater_r = max(1e-6, float(params["heater_resistance_ohm"]))
         tau_s = max(1e-3, float(params["heater_inertia_ms"]) / 1000.0)
-        power = (vin ** 2) / heater_r
-        temp_rise = np.zeros_like(power, dtype=float)
-        for i in range(1, len(power)):
-            dtemp = (power[i] - temp_rise[i - 1]) / tau_s * dt_s[i]
-            temp_rise[i] = temp_rise[i - 1] + dtemp
-        return temp_rise
+        ambient_temp = 25.0
+        r_th = 10.0
+        c_th = max(1e-6, tau_s / r_th)
+        temperature = np.full_like(vin, ambient_temp, dtype=float)
+        for i in range(1, len(vin)):
+            dt = max(dt_s[i], 1e-6)
+            power = (vin[i] ** 2) / heater_r
+            dTdt = (power - (temperature[i - 1] - ambient_temp) / r_th) / c_th
+            temperature[i] = temperature[i - 1] + dt * dTdt
+        return temperature
 
     return vin
 
