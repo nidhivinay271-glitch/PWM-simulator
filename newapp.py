@@ -6,6 +6,7 @@ A web-based dashboard to simulate PWM signals and visualize their effects on LED
 import streamlit as st
 import numpy as np
 import matplotlib
+import time
 
 
 # Force a non-interactive backend for Streamlit compatibility
@@ -19,6 +20,7 @@ import plotly.graph_objects as go
 # ============================================================================
 # IMPROVED: Define voltage constant at module level for consistency
 VMAX = 5.0  # Maximum voltage for PWM signal (volts)
+DEBUG_VALIDATION = True
 
 
 # ============================================================================
@@ -194,6 +196,8 @@ if "duty_cycle" not in st.session_state:
 def apply_preset_mode():
     """Apply selected preset mode by updating duty cycle."""
     st.session_state.duty_cycle = preset_options[st.session_state.preset_mode]
+    if st.session_state.get("comparison_mode") and "comparison_duty_cycle" in st.session_state:
+        st.session_state.comparison_duty_cycle = min(85, st.session_state.duty_cycle + 20)
 
 
 preset_mode = st.sidebar.selectbox(
@@ -301,19 +305,19 @@ rc_tau_ms = st.sidebar.slider(
     label="RC Time Constant (ms)",
     min_value=1.0,
     max_value=200.0,
-    value=35.0,
+    value=3.0,
     step=1.0,
     help="Capacitor charge/discharge time constant"
-) if selected_device == "Capacitor (RC)" else 35.0
+) if selected_device == "Capacitor (RC)" else 3.0
 
 rl_tau_ms = st.sidebar.slider(
     label="RL Time Constant (ms)",
     min_value=1.0,
     max_value=200.0,
-    value=25.0,
+    value=3.0,
     step=1.0,
     help="Inductor current rise/decay time constant"
-) if selected_device == "Inductor (RL)" else 25.0
+) if selected_device == "Inductor (RL)" else 3.0
 
 diode_drop_v = st.sidebar.slider(
     label="Diode Forward Drop (V)",
@@ -444,50 +448,65 @@ def simulate_first_order_response(time_array_ms, input_signal, tau_ms):
     return output
 
 
+def first_order_response(vin, dt_ms, tau_ms):
+    """First-order exponential response (tau in ms)."""
+    time_array_ms = np.cumsum(dt_ms)
+    return simulate_first_order_response(time_array_ms, vin, tau_ms)
+
+
 def compute_device_output(device, time_array_ms, signal_array, duty_cycle, params):
     """Compute device-specific response signals."""
-    high_mask = signal_array > 0
+    dt = np.diff(time_array_ms, prepend=time_array_ms[0])
+    if len(dt) > 1:
+        dt[0] = dt[1]
+    dt = np.maximum(dt, 1e-6)
+
+    vin = signal_array
+
     if device == "LED":
-        return signal_array
-    if device == "Motor":
-        filtered_voltage = simulate_first_order_response(
-            time_array_ms,
-            signal_array,
-            params["motor_tau_ms"]
-        )
-        voltage_norm = np.clip(filtered_voltage / VMAX, 0.0, 1.0)
-        return VMAX * (voltage_norm ** 0.6)
-    if device == "Buzzer":
-        return simulate_first_order_response(time_array_ms, signal_array, params["buzzer_tau_ms"])
-    if device == "Heater":
-        return simulate_first_order_response(time_array_ms, signal_array, params["heater_tau_ms"])
+        return vin
+
     if device == "Capacitor (RC)":
-        target = np.where(high_mask, VMAX, 0.0)
-        return simulate_first_order_response(time_array_ms, target, params["rc_tau_ms"])
+        return simulate_first_order_response(time_array_ms, vin, params["rc_tau_ms"])
+
     if device == "Inductor (RL)":
-        target = np.where(high_mask, VMAX, 0.0)
-        return simulate_first_order_response(time_array_ms, target, params["rl_tau_ms"])
+        return simulate_first_order_response(time_array_ms, vin, params["rl_tau_ms"])
+
     if device == "Diode":
-        return np.maximum(signal_array - params["diode_drop_v"], 0.0)
+        vd = float(params["diode_drop_v"])
+        return np.where(vin > vd, vin - vd, 0.0)
+
     if device == "Zener Diode":
-        return np.clip(signal_array, 0.0, params["zener_v"])
+        vz = float(params["zener_v"])
+        return np.where(vin > vz, vz, vin)
+
     if device == "Transistor":
-        v_th = params["transistor_thresh_v"]
-        v_sat = max(0.2, 0.1 * v_th)
-        v_ce_sat = 0.2
-        linear_region = np.clip((signal_array - v_th) / v_sat, 0.0, 1.0)
-        v_out = np.where(
-            signal_array <= v_th,
-            0.0,
-            (VMAX - v_ce_sat) * linear_region
-        )
-        v_out = np.clip(v_out, 0.0, VMAX - v_ce_sat)
-        return simulate_first_order_response(time_array_ms, v_out, 3.0)
-    return signal_array
+        vth = float(params["transistor_thresh_v"])
+        vce_sat = 0.2
+        output = np.zeros_like(vin)
+        for i in range(len(vin)):
+            if vin[i] >= vth:
+                output[i] = VMAX - vce_sat
+            else:
+                output[i] = 0.0
+        return output
+
+    if device == "Motor":
+        return simulate_first_order_response(time_array_ms, vin, params["motor_tau_ms"])
+
+    if device == "Buzzer":
+        return simulate_first_order_response(time_array_ms, vin, params["buzzer_tau_ms"])
+
+    if device == "Heater":
+        return simulate_first_order_response(time_array_ms, vin, params["heater_tau_ms"])
+
+    return vin
 
 
 @st.cache_data(show_spinner=False)
 def compute_device_output_cached(device, time_array_ms, signal_array, duty_cycle, params_tuple):
+    if DEBUG_VALIDATION:
+        print(f"[CACHE HIT] params={params_tuple}")
     params = {
         "rc_tau_ms": params_tuple[0],
         "rl_tau_ms": params_tuple[1],
@@ -499,6 +518,45 @@ def compute_device_output_cached(device, time_array_ms, signal_array, duty_cycle
         "heater_tau_ms": params_tuple[7]
     }
     return compute_device_output(device, time_array_ms, signal_array, duty_cycle, params)
+
+
+def debug_validation_block(
+    label,
+    time_array,
+    signal_array,
+    device_output,
+    comparison_time_array=None,
+    comparison_output=None
+):
+    print(f"\n--- DEBUG: {label} ---")
+
+    start = time.perf_counter()
+    _ = np.mean(device_output)
+    elapsed = (time.perf_counter() - start) * 1000
+    print(f"Compute touch time: {elapsed:.3f} ms")
+
+    if np.any(np.isnan(device_output)) or np.any(np.isinf(device_output)):
+        print("⚠️ Invalid values detected (NaN/Inf)")
+    else:
+        print("✅ Output values valid")
+
+    print(f"Output range: min={device_output.min():.4f}, max={device_output.max():.4f}")
+
+    if comparison_time_array is not None and comparison_output is not None:
+        if len(time_array) != len(comparison_time_array):
+            print("⚠️ Time arrays differ in length")
+
+        interp_comp = np.interp(time_array, comparison_time_array, comparison_output)
+
+        error = np.mean(np.abs(interp_comp - device_output))
+        print(f"Alignment mean abs error: {error:.6f}")
+
+        if error > 0.05:
+            print("⚠️ Possible misalignment detected")
+        else:
+            print("✅ Alignment OK")
+
+    print("--- END DEBUG ---\n")
 
 
 def calculate_led_brightness(duty_cycle):
@@ -796,6 +854,13 @@ device_output = compute_device_output_cached(
     duty_cycle,
     device_params_tuple
 )
+if DEBUG_VALIDATION:
+    debug_validation_block(
+        "MAIN",
+        time_array,
+        signal_array,
+        device_output
+    )
 
 # IMPROVED: Calculate all real-world parameters in one section
 led_brightness = calculate_led_brightness(duty_cycle)
@@ -841,7 +906,9 @@ with col1:
     ax.set_yticks([0, 1, 2, 3, 4, 5])
     ax.set_yticklabels(["0V", "1V", "2V", "3V", "4V", "5V"])
     ax.grid(True, alpha=0.3, linestyle="--")
-    ax.legend(loc="upper right", fontsize=10)
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(loc="upper right", fontsize=10)
     
     # Add annotations for duty cycle
     ax.text(0.5, 1.15, f"Duty Cycle: {duty_cycle}% | Frequency: {frequency} Hz",
@@ -1250,13 +1317,26 @@ if comparison_mode and comparison_duty_cycle is not None:
 
         comparison_duty_cycle = int(np.clip(comparison_duty_cycle, 0, 100))
         comparison_time_array, comparison_signal_array = generate_pwm_signal(comparison_duty_cycle, frequency, time_duration)
-        comparison_device_output = compute_device_output(
+        comparison_device_output = compute_device_output_cached(
             selected_device,
             comparison_time_array,
             comparison_signal_array,
             comparison_duty_cycle,
-            device_params
+            device_params_tuple
         )
+        if comparison_time_array.shape != time_array.shape or not np.allclose(comparison_time_array, time_array):
+            comparison_signal_array = np.interp(time_array, comparison_time_array, comparison_signal_array)
+            comparison_device_output = np.interp(time_array, comparison_time_array, comparison_device_output)
+            comparison_time_array = time_array
+        if DEBUG_VALIDATION:
+            debug_validation_block(
+                "COMPARISON",
+                time_array,
+                signal_array,
+                device_output,
+                comparison_time_array,
+                comparison_device_output
+            )
         comparison_fig = go.Figure()
 
         # === PWM GRAPH FIX START ===
