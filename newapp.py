@@ -500,15 +500,17 @@ def simulate_rc_response(time_array_ms, input_signal, resistance_ohm, capacitanc
     return vc
 
 
-def simulate_rl_response(time_array_ms, vin, tau_ms):
-    """Simulate RL response using a tau-based current update and return V_R, V_L."""
-    tau_ms = max(0.1, float(tau_ms))
+def simulate_rl_response(time_array_ms, vin, inductance_h, resistance_ohm):
+    """Simulate RL response using V = L * di/dt + R*i and return V_R, V_L."""
     dt_ms = _sanitize_time_steps(time_array_ms)
+    dt_s = dt_ms / 1000.0
+    inductance_h = max(1e-6, float(inductance_h))
+    resistance_ohm = max(1e-6, float(resistance_ohm))
     current = np.zeros_like(vin, dtype=float)
     for i in range(1, len(vin)):
-        alpha = dt_ms[i] / tau_ms
-        current[i] = current[i - 1] + alpha * (vin[i] - current[i - 1])
-    v_r = current
+        di = (vin[i - 1] - current[i - 1] * resistance_ohm) / inductance_h * dt_s[i]
+        current[i] = current[i - 1] + di
+    v_r = current * resistance_ohm
     v_l = vin - v_r
     return v_r, v_l
 
@@ -537,7 +539,8 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
         v_r, v_l = simulate_rl_response(
             time_array_ms,
             vin,
-            params["rl_tau_ms"]
+            params["rl_inductance_h"],
+            params["rl_resistance_ohm"]
         )
         return v_l if params["rl_output_mode"] == "Inductor Voltage" else v_r
 
@@ -573,8 +576,6 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
 
 
 def compute_device_output_cached(device, time_array_ms, signal_array, duty_cycle, params_tuple):
-    if DEBUG_VALIDATION:
-        print(f"[CACHE HIT] params={params_tuple}")
     params = {
         "rc_resistance_ohm": params_tuple[0],
         "rc_capacitance_f": params_tuple[1],
