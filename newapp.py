@@ -1390,7 +1390,7 @@ fig_advanced.add_trace(go.Scatter(
     name=f"{selected_device} Output",
     line=dict(color='#e74c3c', width=2)
 ))
-    if debug_mode and selected_device == "Inductor (RL)":
+if debug_mode and selected_device == "Inductor (RL)":
     print(f"[RL CHECKSUM] advanced={_checksum_array(device_output)}")
 # === PWM GRAPH FIX END ===
 
@@ -1770,5 +1770,6 @@ if user_question:
     st.success(f"**🤖 AI Assistant:** {response}")
 # === AI CHAT UPGRADE END ===
 # === AI FEATURE END ===
+
 
 
