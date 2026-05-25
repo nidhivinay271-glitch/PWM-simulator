@@ -629,7 +629,17 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
     if device == "LED":
         vf = float(params["led_forward_v"])
         r_led = max(1e-6, float(params["led_series_resistance_ohm"]))
-        return np.where(vin > vf, (vin - vf) / r_led, 0.0)
+        vt = 0.025
+        ideality = 2.0
+        sat_current = 1e-12
+        led_current = np.zeros_like(vin, dtype=float)
+        for i in range(len(vin)):
+            v_prev_i = r_led * led_current[i - 1] if i > 0 else 0.0
+            vd = np.clip(vin[i] - v_prev_i, -20.0, 20.0)
+            diode_i = sat_current * (np.exp(vd / (ideality * vt)) - 1.0)
+            resistor_i = max(0.0, (vin[i] - vf) / r_led)
+            led_current[i] = 0.7 * diode_i + 0.3 * resistor_i
+        return led_current
 
     if device == "Capacitor (RC)":
         return simulate_rc_response(
@@ -684,23 +694,29 @@ def compute_device_output(device, time_array_ms, signal_array, duty_cycle, param
         omega = np.zeros_like(vin_scaled, dtype=float)
         for i in range(1, len(vin_scaled)):
             back_emf = ke * omega[i - 1]
-            di = (vin_scaled[i - 1] - motor_r * current[i - 1] - back_emf) / motor_l * dt_s[i]
+            effective_v = vin_scaled[i] - back_emf
+            effective_v = np.clip(effective_v, -motor_supply_v, motor_supply_v)
+            dt = max(dt_s[i], 1e-6)
+            di = (effective_v - motor_r * current[i - 1]) / motor_l * dt
             current[i] = current[i - 1] + di
-            torque = ki * current[i - 1]
-            domega = (torque - damping * omega[i - 1]) / inertia * dt_s[i]
-            omega[i] = omega[i - 1] + domega
+            torque = ki * current[i]
+            domega = (torque - damping * omega[i - 1]) / inertia * dt
+            omega[i] = max(omega[i - 1] + domega, 0.0)
 
-        return ke * omega
+        return omega
 
     if device == "Buzzer":
         buzzer_v = float(params["buzzer_operating_v"])
         buzzer_gain = float(params["buzzer_gain"])
-        envelope_target = (vin / VMAX) * buzzer_v * buzzer_gain
-        envelope = np.zeros_like(envelope_target, dtype=float)
-        alpha = 0.1
-        for i in range(1, len(envelope)):
-            envelope[i] = envelope[i - 1] + alpha * (envelope_target[i] - envelope[i - 1])
-        return envelope
+        rectified = np.clip(np.abs(vin / max(VMAX, 1e-9)), 0.0, 1.0)
+        envelope = np.zeros_like(rectified, dtype=float)
+        tau_env = 0.03
+        for i in range(1, len(rectified)):
+            dt = max(dt_s[i], 1e-6)
+            alpha = dt / (tau_env + dt)
+            instantaneous = rectified[i] + 0.1 * (rectified[i] - rectified[i - 1])
+            envelope[i] = envelope[i - 1] + alpha * (instantaneous - envelope[i - 1])
+        return envelope * buzzer_v * buzzer_gain
 
     if device == "Heater":
         heater_r = max(1e-6, float(params["heater_resistance_ohm"]))
