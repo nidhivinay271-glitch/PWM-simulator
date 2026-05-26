@@ -2647,4 +2647,5 @@ with col2:
             </div>
             """,
             unsafe_allow_html=True
+
         )
