@@ -176,29 +176,39 @@ def simulate_transistor(vin, dt, Vth=1.2, gain=1.0, tau=0.0003):
         ) * (dt / tau)
 
     return vout
+def simulate_motor(vin, dt, tau_electrical=0.002, tau_mechanical=0.05):
 
-def simulate_heater(vin, dt, tau=1.5):
-
-    temperature = np.zeros_like(vin)
-
-    ambient = 0.0
+    # Electrical response
+    current = np.zeros_like(vin)
 
     for i in range(1, len(vin)):
 
-        # PWM heating target
+        current[i] = current[i - 1] + (
+            vin[i] - current[i - 1]
+        ) * (dt / tau_electrical)
+
+    # Mechanical inertia / speed
+    speed = np.zeros_like(vin)
+
+    for i in range(1, len(vin)):
+
+        speed[i] = speed[i - 1] + (
+            current[i] - speed[i - 1]
+        ) * (dt / tau_mechanical)
+
+    return speed
+
+def simulate_heater(vin, dt, tau=0.05):
+
+    temperature = np.zeros_like(vin)
+
+    for i in range(1, len(vin)):
+
         target_temp = vin[i]
 
-        # Thermal inertia equation
-        dT = (
+        temperature[i] = temperature[i - 1] + (
             target_temp - temperature[i - 1]
         ) * (dt / tau)
-
-        temperature[i] = temperature[i - 1] + dT
-
-        # Small cooling toward ambient
-        temperature[i] += (
-            ambient - temperature[i]
-        ) * 0.001
 
     return temperature
 
@@ -234,24 +244,13 @@ def simulate_heater(vin, dt, tau=1.5):
     return temperature
 
 
-def simulate_buzzer(vin, dt, tau=0.002, threshold=2.5):
+def simulate_buzzer(vin, threshold=2.5):
 
-    target = np.where(
+    return np.where(
         vin > threshold,
-        vin,
+        1.0,
         0.0
     )
-
-    out = np.zeros_like(vin)
-
-    for i in range(1, len(vin)):
-
-        out[i] = out[i - 1] + (
-            target[i] - out[i - 1]
-        ) * (dt / tau)
-
-    return out
-
 
 def get_device_response(device, vin, dt):
     if device == "capacitor":
@@ -271,7 +270,7 @@ def get_device_response(device, vin, dt):
     elif device == "heater":
         return simulate_heater(vin, dt)
     elif device == "buzzer":
-        return simulate_buzzer(vin, dt)
+        return simulate_buzzer(vin)
     else:
         raise ValueError("Unknown device")
 
