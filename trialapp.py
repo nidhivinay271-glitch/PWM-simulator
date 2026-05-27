@@ -712,10 +712,6 @@ if st.button(
                 ⚙️
             </div>
 
-            <h3>
-                Speed: {'█'*bars}
-            </h3>
-
             <p>{int(v*100)} % RPM</p>
 
             </div>
