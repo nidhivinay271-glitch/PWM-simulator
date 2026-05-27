@@ -157,6 +157,25 @@ def simulate_zener(vin, dt, Vz=3.3, tau=0.0005):
         ) * (dt / tau)
 
     return vout
+def simulate_transistor(vin, dt, Vth=1.2, gain=1.0, tau=0.0003):
+
+    # Transistor turns ON above threshold
+    target = np.where(
+        vin > Vth,
+        (vin - Vth) * gain,
+        0.0
+    )
+
+    # Add switching dynamics
+    vout = np.zeros_like(vin)
+
+    for i in range(1, len(vin)):
+
+        vout[i] = vout[i - 1] + (
+            target[i] - vout[i - 1]
+        ) * (dt / tau)
+
+    return vout
 
 def simulate_heater(vin, dt, tau=1.5):
 
@@ -246,13 +265,13 @@ def get_device_response(device, vin, dt):
     elif device == "zener":
         return simulate_zener(vin, dt)
     elif device == "transistor":
-        return simulate_transistor(vin)
+        return simulate_transistor(vin, dt)
     elif device == "motor":
         return simulate_motor(vin, dt)
     elif device == "heater":
         return simulate_heater(vin, dt)
     elif device == "buzzer":
-        return simulate_buzzer(vin)
+        return simulate_buzzer(vin, dt)
     else:
         raise ValueError("Unknown device")
 
