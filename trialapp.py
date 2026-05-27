@@ -81,7 +81,19 @@ def first_order_system(vin, dt, tau):
 
 
 def simulate_rc(vin, dt, R=1000, C=1e-6):
-    return first_order_system(vin, dt, R * C)
+
+    tau = R * C
+    vout = np.zeros_like(vin)
+
+    for i in range(1, len(vin)):
+
+        dv = (
+            vin[i] - vout[i - 1]
+        ) * (dt / tau)
+
+        vout[i] = vout[i - 1] + dv
+
+    return vout
 
 
 def simulate_rl(vin, dt, R=10, L=10e-3):
@@ -101,8 +113,19 @@ def simulate_rl(vin, dt, R=10, L=10e-3):
     return current
 
 
-def simulate_led(vin, Vf=2.0, R=220):
-    return np.where(vin > Vf, 1.0, 0.0)
+def simulate_led(vin, Vf=2.0):
+
+    brightness = np.where(
+        vin > Vf,
+        (vin - Vf) / (5.0 - Vf),
+        0.0
+    )
+
+    return np.clip(
+        brightness,
+        0.0,
+        1.0
+    )
 
 
 def simulate_diode(vin, dt, Vf=0.7, tau=0.0002):
@@ -135,20 +158,80 @@ def simulate_zener(vin, dt, Vz=3.3, tau=0.0005):
 
     return vout
 
-def simulate_transistor(vin, Vth=1.0):
-    return np.where(vin > Vth, vin, 0.0)
+def simulate_heater(vin, dt, tau=1.5):
+
+    temperature = np.zeros_like(vin)
+
+    ambient = 0.0
+
+    for i in range(1, len(vin)):
+
+        # PWM heating target
+        target_temp = vin[i]
+
+        # Thermal inertia equation
+        dT = (
+            target_temp - temperature[i - 1]
+        ) * (dt / tau)
+
+        temperature[i] = temperature[i - 1] + dT
+
+        # Small cooling toward ambient
+        temperature[i] += (
+            ambient - temperature[i]
+        ) * 0.001
+
+    return temperature
 
 
-def simulate_motor(vin, dt, tau=0.05):
-    return first_order_system(vin, dt, tau)
+def simulate_rc(vin, dt, R=1000, C=1e-6):
+
+    tau = R * C
+    vout = np.zeros_like(vin)
+
+    for i in range(1, len(vin)):
+
+        dv = (
+            vin[i] - vout[i - 1]
+        ) * (dt / tau)
+
+        vout[i] = vout[i - 1] + dv
+
+    return vout
 
 
-def simulate_heater(vin, dt, tau=0.5):
-    return first_order_system(vin, dt, tau)
+def simulate_heater(vin, dt, tau=1.5):
+
+    temperature = np.zeros_like(vin)
+
+    for i in range(1, len(vin)):
+
+        target_temp = vin[i]
+
+        temperature[i] = temperature[i - 1] + (
+            target_temp - temperature[i - 1]
+        ) * (dt / tau)
+
+    return temperature
 
 
-def simulate_buzzer(vin, threshold=2.5):
-    return (vin > threshold).astype(float) * vin
+def simulate_buzzer(vin, dt, tau=0.002, threshold=2.5):
+
+    target = np.where(
+        vin > threshold,
+        vin,
+        0.0
+    )
+
+    out = np.zeros_like(vin)
+
+    for i in range(1, len(vin)):
+
+        out[i] = out[i - 1] + (
+            target[i] - out[i - 1]
+        ) * (dt / tau)
+
+    return out
 
 
 def get_device_response(device, vin, dt):
