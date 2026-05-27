@@ -84,25 +84,56 @@ def simulate_rc(vin, dt, R=1000, C=1e-6):
     return first_order_system(vin, dt, R * C)
 
 
-def simulate_rl(vin, dt, R=100, L=1e-3):
-    i = np.zeros_like(vin)
+def simulate_rl(vin, dt, R=10, L=10e-3):
+
+    current = np.zeros_like(vin)
 
     for k in range(1, len(vin)):
-        i[k] = i[k-1] + (vin[k] - i[k-1] * R) * (dt / L)
 
-    return i 
+        # RL differential equation:
+        # di/dt = (V - iR)/L
+
+        di = (vin[k] - current[k-1] * R) * (dt / L)
+
+        current[k] = current[k-1] + di
+
+    # Scale for visualization
+    return current
 
 
 def simulate_led(vin, Vf=2.0, R=220):
     return np.where(vin > Vf, 1.0, 0.0)
 
 
-def simulate_diode(vin, Vf=0.7):
-    return np.where(vin > Vf, vin - Vf, 0.0)
+def simulate_diode(vin, dt, Vf=0.7, tau=0.0002):
 
+    # Ideal diode conduction
+    target = np.where(vin > Vf, vin - Vf, 0.0)
 
-def simulate_zener(vin, Vz=3.3):
-    return np.where(vin > Vz, Vz, vin)
+    # Dynamic response
+    vout = np.zeros_like(vin)
+
+    for i in range(1, len(vin)):
+        vout[i] = vout[i-1] + (
+            target[i] - vout[i-1]
+        ) * (dt / tau)
+
+    return vout
+
+def simulate_zener(vin, dt, Vz=3.3, tau=0.0005):
+
+    # Ideal zener clamp
+    target = np.where(vin > Vz, Vz, vin)
+
+    # Add slight dynamic response
+    vout = np.zeros_like(vin)
+
+    for i in range(1, len(vin)):
+        vout[i] = vout[i-1] + (
+            target[i] - vout[i-1]
+        ) * (dt / tau)
+
+    return vout
 
 def simulate_transistor(vin, Vth=1.0):
     return np.where(vin > Vth, vin, 0.0)
@@ -128,9 +159,9 @@ def get_device_response(device, vin, dt):
     elif device == "led":
         return simulate_led(vin)
     elif device == "diode":
-        return simulate_diode(vin)
+        return simulate_diode(vin, dt)
     elif device == "zener":
-        return simulate_zener(vin)
+        return simulate_zener(vin, dt)
     elif device == "transistor":
         return simulate_transistor(vin)
     elif device == "motor":
