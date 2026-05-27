@@ -176,9 +176,10 @@ def simulate_transistor(vin, dt, Vth=1.2, gain=1.0, tau=0.0003):
         ) * (dt / tau)
 
     return vout
-def simulate_motor(vin, dt, tau_electrical=0.002, tau_mechanical=0.05):
+def simulate_motor(vin, dt,
+                   tau_electrical=0.001,
+                   tau_mechanical=0.01):
 
-    # Electrical response
     current = np.zeros_like(vin)
 
     for i in range(1, len(vin)):
@@ -187,7 +188,6 @@ def simulate_motor(vin, dt, tau_electrical=0.002, tau_mechanical=0.05):
             vin[i] - current[i - 1]
         ) * (dt / tau_electrical)
 
-    # Mechanical inertia / speed
     speed = np.zeros_like(vin)
 
     for i in range(1, len(vin)):
@@ -198,51 +198,19 @@ def simulate_motor(vin, dt, tau_electrical=0.002, tau_mechanical=0.05):
 
     return speed
 
-def simulate_heater(vin, dt, tau=0.05):
+def simulate_heater(vin, dt, tau=0.02):
 
     temperature = np.zeros_like(vin)
 
     for i in range(1, len(vin)):
 
-        target_temp = vin[i]
+        target = vin[i]
 
         temperature[i] = temperature[i - 1] + (
-            target_temp - temperature[i - 1]
+            target - temperature[i - 1]
         ) * (dt / tau)
 
     return temperature
-
-
-def simulate_rc(vin, dt, R=1000, C=1e-6):
-
-    tau = R * C
-    vout = np.zeros_like(vin)
-
-    for i in range(1, len(vin)):
-
-        dv = (
-            vin[i] - vout[i - 1]
-        ) * (dt / tau)
-
-        vout[i] = vout[i - 1] + dv
-
-    return vout
-
-
-def simulate_heater(vin, dt, tau=1.5):
-
-    temperature = np.zeros_like(vin)
-
-    for i in range(1, len(vin)):
-
-        target_temp = vin[i]
-
-        temperature[i] = temperature[i - 1] + (
-            target_temp - temperature[i - 1]
-        ) * (dt / tau)
-
-    return temperature
-
 
 def simulate_buzzer(vin, threshold=2.5):
 
@@ -393,8 +361,12 @@ st.sidebar.header("PWM Controls")
 
 frequency = st.sidebar.slider("Frequency (Hz)", 1, 20000, config.DEFAULT_FREQUENCY)
 duty_cycle = st.sidebar.slider("Duty Cycle (%)", 0, 100, config.DEFAULT_DUTY_CYCLE)
-time_window = st.sidebar.slider("Time Window (s)", 0.001, 0.1, config.DEFAULT_TIME_WINDOW)
-
+timtime_window = st.sidebar.slider(
+    "Time Window (s)",
+    0.001,
+    2.0,
+    0.2
+)
 device = st.sidebar.selectbox(
     "Device",
     ["capacitor", "inductor", "led", "diode", "zener", "transistor", "motor", "heater", "buzzer"]
