@@ -333,11 +333,6 @@ KNOWLEDGE_BASE = [
 # SEMANTIC CHATBOT ENGINE
 # =============================================================================
 
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
-
-import numpy as np
-
 _kb_texts = [item["text"] for item in KNOWLEDGE_BASE]
 
 @st.cache_resource
