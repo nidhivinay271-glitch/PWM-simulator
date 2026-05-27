@@ -630,9 +630,16 @@ if query:
 # DEVICE ANIMATION
 # =============================================================================
 
+# =============================================================================
+# DEVICE ANIMATION
+# =============================================================================
+
 st.subheader("🎞 Device Animation")
 
-if st.button("Run Animation"):
+if st.button(
+    "Run Animation",
+    key="run_animation_button"
+):
 
     placeholder = st.empty()
 
@@ -642,101 +649,336 @@ if st.button("Run Animation"):
         np.max(output) - np.min(output) + 1e-9
     )
 
-    for v in norm[::max(1, len(norm)//100)]:
+    max_frames = 120
+
+    step = max(
+        1,
+        len(norm) // max_frames
+    )
+
+    for v in norm[::step]:
+
+        # =========================================================
+        # LED
+        # =========================================================
 
         if device == "led":
 
-            intensity = int(v * 255)
+            glow = int(50 + v * 205)
+
+            size = 80 + int(v * 40)
+
+            html = f"""
+            <div style="
+                text-align:center;
+                font-size:{size}px;
+                filter: drop-shadow(
+                    0 0 {20*v}px
+                    rgb(255,255,0)
+                );
+            ">
+                💡
+            </div>
+
+            <h3 style="
+                text-align:center;
+                color:rgb({glow},{glow},0);
+            ">
+                Brightness: {int(v*100)}%
+            </h3>
+            """
 
             placeholder.markdown(
-                f"""
-                <div style="
-                width:120px;
-                height:120px;
-                border-radius:50%;
-                margin:auto;
-                background-color:
-                rgb({intensity},{intensity},0);
-                ">
-                </div>
-                """,
+                html,
                 unsafe_allow_html=True
             )
 
+        # =========================================================
+        # MOTOR
+        # =========================================================
+
         elif device == "motor":
 
-            placeholder.metric(
-                "Motor Speed",
-                f"{int(v*100)} %"
+            bars = int(v * 10)
+
+            html = f"""
+            <div style="text-align:center;">
+
+            <div style="
+                font-size:{80 + int(v*40)}px;
+                transform: rotate({v*360}deg);
+                transition: 0.05s linear;
+            ">
+                ⚙️
+            </div>
+
+            <h3>
+                Speed: {'█'*bars}
+            </h3>
+
+            <p>{int(v*100)} % RPM</p>
+
+            </div>
+            """
+
+            placeholder.markdown(
+                html,
+                unsafe_allow_html=True
             )
+
+        # =========================================================
+        # HEATER
+        # =========================================================
 
         elif device == "heater":
 
-            placeholder.metric(
-                "Temperature",
-                f"{int(v*100)} °C"
+            red = int(100 + v * 155)
+
+            html = f"""
+            <div style="text-align:center;">
+
+            <div style="
+                font-size:{80 + int(v*20)}px;
+            ">
+                🔥
+            </div>
+
+            <h2 style="
+                color:rgb({red},50,0);
+            ">
+                Temperature
+            </h2>
+
+            <h3>
+                {int(v*300)} °C
+            </h3>
+
+            </div>
+            """
+
+            placeholder.markdown(
+                html,
+                unsafe_allow_html=True
             )
+
+        # =========================================================
+        # BUZZER
+        # =========================================================
 
         elif device == "buzzer":
 
-            state = "ON 🔊" if v > 0.5 else "OFF 🔇"
+            state = "🔊" if v > 0.5 else "🔈"
 
-            placeholder.metric(
-                "Buzzer",
-                state
+            html = f"""
+            <div style="text-align:center;">
+
+            <div style="
+                font-size:{80 + int(v*30)}px;
+            ">
+                {state}
+            </div>
+
+            <h2>
+                Sound Level
+            </h2>
+
+            <h3>
+                {int(v*100)} %
+            </h3>
+
+            </div>
+            """
+
+            placeholder.markdown(
+                html,
+                unsafe_allow_html=True
             )
+
+        # =========================================================
+        # CAPACITOR
+        # =========================================================
 
         elif device == "capacitor":
 
-            placeholder.progress(float(v))
+            fill = int(v * 100)
+
+            html = f"""
+            <div style="text-align:center;">
+
+            <div style="
+                font-size:{70 + int(v*20)}px;
+            ">
+                🔋
+            </div>
+
+            <h2>
+                Charge Level
+            </h2>
+
+            <div style="
+                width:300px;
+                height:30px;
+                margin:auto;
+                border:2px solid white;
+                border-radius:10px;
+            ">
+
+            <div style="
+                width:{fill}%;
+                height:100%;
+                background:lime;
+                border-radius:8px;
+            "></div>
+
+            </div>
+
+            <h3>{fill}%</h3>
+
+            </div>
+            """
+
+            placeholder.markdown(
+                html,
+                unsafe_allow_html=True
+            )
+
+        # =========================================================
+        # INDUCTOR
+        # =========================================================
 
         elif device == "inductor":
 
-            placeholder.metric(
-                "Current",
-                f"{int(v*100)} %"
+            waves = int(v * 8)
+
+            html = f"""
+            <div style="text-align:center;">
+
+            <div style="
+                font-size:{80 + int(v*20)}px;
+            ">
+                🌀
+            </div>
+
+            <h2>
+                Magnetic Field
+            </h2>
+
+            <h3>
+                {'➰'*waves}
+            </h3>
+
+            <p>
+                Current: {int(v*100)}%
+            </p>
+
+            </div>
+            """
+
+            placeholder.markdown(
+                html,
+                unsafe_allow_html=True
             )
+
+        # =========================================================
+        # DIODE
+        # =========================================================
 
         elif device == "diode":
 
             state = (
-                "Conducting"
-                if v > 0.1
-                else "Blocking"
+                "Conducting ✅"
+                if v > 0.2
+                else "Blocking ❌"
             )
 
-            placeholder.metric(
-                "Diode",
-                state
+            html = f"""
+            <div style="text-align:center;">
+
+            <div style="
+                font-size:90px;
+            ">
+                ➡️
+            </div>
+
+            <h2>{state}</h2>
+
+            </div>
+            """
+
+            placeholder.markdown(
+                html,
+                unsafe_allow_html=True
             )
+
+        # =========================================================
+        # ZENER
+        # =========================================================
 
         elif device == "zener":
 
             state = (
-                "Clamped"
-                if v > 0.8
+                "Voltage Clamped ⚡"
+                if v > 0.7
                 else "Normal"
             )
 
-            placeholder.metric(
-                "Zener",
-                state
+            html = f"""
+            <div style="text-align:center;">
+
+            <div style="
+                font-size:{80 + int(v*20)}px;
+            ">
+                ⚡
+            </div>
+
+            <h2>{state}</h2>
+
+            <p>
+                Regulation: {int(v*100)}%
+            </p>
+
+            </div>
+            """
+
+            placeholder.markdown(
+                html,
+                unsafe_allow_html=True
             )
+
+        # =========================================================
+        # TRANSISTOR
+        # =========================================================
 
         elif device == "transistor":
 
             state = (
-                "ON"
+                "ON 🟢"
                 if v > 0.5
-                else "OFF"
+                else "OFF 🔴"
             )
 
-            placeholder.metric(
-                "Transistor",
-                state
+            html = f"""
+            <div style="text-align:center;">
+
+            <div style="
+                font-size:{80 + int(v*15)}px;
+            ">
+                🔀
+            </div>
+
+            <h2>{state}</h2>
+
+            <p>
+                Switching Level:
+                {int(v*100)}%
+            </p>
+
+            </div>
+            """
+
+            placeholder.markdown(
+                html,
+                unsafe_allow_html=True
             )
 
-        time.sleep(0.01)
-if st.button("Run Animation"):
-
-    animate_device(device, output)
+        time.sleep(0.02)
