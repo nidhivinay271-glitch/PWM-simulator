@@ -82,45 +82,99 @@ def generate_pwm_signal(duty_cycle, frequency, time_duration_s):
 # DEVICE MODELS
 # =============================================================================
 
-def first_order_system(vin, dt, tau):
-    tau = max(float(tau), 1e-9)
+def first_order_filter(vin, dt, tau):
+
     y = np.zeros_like(vin, dtype=float)
 
+    alpha = dt / (tau + dt)
+
     for i in range(1, len(vin)):
-        y[i] = y[i - 1] + (vin[i] - y[i - 1]) * (dt / tau)
+
+        y[i] = y[i - 1] + alpha * (
+            vin[i] - y[i - 1]
+        )
 
     return y
 
 
-def simulate_rc(vin, dt, R=1000, C=1e-6):
+# =============================================================================
+# CAPACITOR (RC FILTER)
+# =============================================================================
+
+def simulate_rc(vin, dt, R=1000, C=10e-6):
+
     tau = R * C
-    return first_order_system(vin, dt, tau)
+
+    vout = np.zeros_like(vin, dtype=float)
+
+    alpha = dt / (tau + dt)
+
+    for i in range(1, len(vin)):
+
+        # charge/discharge behavior
+        vout[i] = vout[i - 1] + alpha * (
+            vin[i] - vout[i - 1]
+        )
+
+    return vout
 
 
-def simulate_rl(vin, dt, R=2.0, L=5e-3):
+# =============================================================================
+# INDUCTOR (RL CURRENT RAMP)
+# =============================================================================
+
+def simulate_rl(vin, dt, R=3.0, L=10e-3):
+
     current = np.zeros_like(vin, dtype=float)
 
     for i in range(1, len(vin)):
-        di = (vin[i] - current[i - 1] * R) * (dt / L)
-        current[i] = current[i - 1] + di
 
-    # Scaled for easier visualization on the same plot axis
-    return np.clip(current * R, 0.0, VMAX)
+        # RL differential equation
+        di_dt = (
+            vin[i] - R * current[i - 1]
+        ) / L
 
+        current[i] = current[i - 1] + di_dt * dt
+
+    # scale current into visible voltage range
+    current_scaled = current * R
+
+    return np.clip(current_scaled, 0, VMAX)
+
+
+# =============================================================================
+# LED
+# =============================================================================
 
 def simulate_led(vin, Vf=2.0):
+
     brightness = np.where(
         vin > Vf,
-        (vin - Vf) / max(VMAX - Vf, 1e-9) * VMAX,
+        ((vin - Vf) / (VMAX - Vf)) * VMAX,
         0.0
     )
-    return np.clip(brightness, 0.0, VMAX)
 
+    return np.clip(brightness, 0, VMAX)
+
+
+# =============================================================================
+# NORMAL DIODE
+# =============================================================================
 
 def simulate_diode(vin, dt, Vf=0.7):
-    # Pure rectifier-like output: distinct from zener/transistor
-    return np.where(vin > Vf, vin - Vf, 0.0)
 
+    vout = np.where(
+        vin > Vf,
+        vin - Vf,
+        0.0
+    )
+
+    return vout
+
+
+# =============================================================================
+# ZENER DIODE
+# =============================================================================
 
 def simulate_zener(vin, dt, Vz=3.3):
 
@@ -128,81 +182,140 @@ def simulate_zener(vin, dt, Vz=3.3):
 
     for i in range(len(vin)):
 
+        # below threshold
         if vin[i] < 0.7:
-            # no conduction
-            vout[i] = 0
 
+            vout[i] = 0.0
+
+        # forward conduction region
         elif vin[i] < Vz:
-            # normal diode region
+
             vout[i] = vin[i] - 0.7
 
+        # zener clamp region
         else:
-            # zener breakdown clamp
+
             vout[i] = Vz
+
+    # slight smoothing
+    vout = first_order_filter(
+        vout,
+        dt,
+        tau=0.0002
+    )
 
     return vout
 
+
+# =============================================================================
+# TRANSISTOR SWITCHING
+# =============================================================================
 
 def simulate_transistor(vin, dt, Vth=1.2):
 
+    target = np.where(
+        vin > Vth,
+        VMAX,
+        0.0
+    )
+
     vout = np.zeros_like(vin)
 
-    for i in range(len(vin)):
+    tau = 0.00008
 
-        if vin[i] > Vth:
-            # transistor ON
-            vout[i] = 5.0
+    alpha = dt / (tau + dt)
 
-        else:
-            # transistor OFF
-            vout[i] = 0.0
+    for i in range(1, len(vin)):
+
+        # switching rise/fall transition
+        vout[i] = vout[i - 1] + alpha * (
+            target[i] - vout[i - 1]
+        )
 
     return vout
 
-def simulate_motor(vin, dt):
-    # Electrical + mechanical lag
-    electrical_tau = 0.003
-    mechanical_tau = 0.03
 
-    current = np.zeros_like(vin, dtype=float)
-    speed = np.zeros_like(vin, dtype=float)
+# =============================================================================
+# MOTOR
+# =============================================================================
+
+def simulate_motor(vin, dt):
+
+    electrical_tau = 0.005
+    mechanical_tau = 0.08
+
+    current = np.zeros_like(vin)
+    speed = np.zeros_like(vin)
 
     for i in range(1, len(vin)):
-        current[i] = current[i - 1] + (vin[i] - current[i - 1]) * (dt / electrical_tau)
-        speed[i] = speed[i - 1] + (current[i] - speed[i - 1]) * (dt / mechanical_tau)
 
-    return np.clip(speed, 0.0, VMAX)
+        # electrical current lag
+        current[i] = current[i - 1] + (
+            vin[i] - current[i - 1]
+        ) * (dt / electrical_tau)
 
+        # mechanical inertia
+        speed[i] = speed[i - 1] + (
+            current[i] - speed[i - 1]
+        ) * (dt / mechanical_tau)
+
+    return np.clip(speed, 0, VMAX)
+
+
+# =============================================================================
+# HEATER
+# =============================================================================
 
 def simulate_heater(vin, dt):
 
-    heater = np.zeros_like(vin)
-
-    ambient = 25.0
-
-    heater[0] = ambient
+    ambient_temp = 25.0
+    max_temp = 250.0
 
     thermal_tau = 0.5
 
-    max_temp = 250
+    temp = np.zeros_like(vin)
+
+    temp[0] = ambient_temp
+
+    alpha = dt / (thermal_tau + dt)
 
     for i in range(1, len(vin)):
 
         power = vin[i] / VMAX
 
-        target_temp = ambient + power * (max_temp - ambient)
+        target_temp = (
+            ambient_temp +
+            power * (max_temp - ambient_temp)
+        )
 
-        heater[i] = heater[i - 1] + (
-            target_temp - heater[i - 1]
-        ) * (dt / thermal_tau)
+        temp[i] = temp[i - 1] + alpha * (
+            target_temp - temp[i - 1]
+        )
 
-    return heater
+    return temp
 
+
+# =============================================================================
+# BUZZER
+# =============================================================================
 
 def simulate_buzzer(vin, dt, threshold=2.5):
-    # Digital-like buzzer output, distinct from capacitor-like smoothing
-    return np.where(vin > threshold, VMAX, 0.0)
 
+    tone = np.where(
+        vin > threshold,
+        1.0,
+        0.0
+    )
+
+    output = np.zeros_like(vin)
+
+    for i in range(1, len(vin)):
+
+        output[i] = output[i - 1] + 0.35 * (
+            tone[i] - output[i - 1]
+        )
+
+    return output * VMAX
 
 # =============================================================================
 # DEVICE RESPONSE ROUTER
