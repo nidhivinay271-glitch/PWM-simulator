@@ -432,10 +432,6 @@ def generate_insights(device, frequency, duty_cycle, metrics):
     final_output = []
     final_output.append("📊 SMART INSIGHTS")
     final_output.extend(insights)
-    final_output.append("")
-    final_output.append("⚡ RECOMMENDATIONS")
-    final_output.extend(recommendations)
-
     return final_output
 
 
