@@ -272,40 +272,142 @@ void loop()
 # PLOT
 # =============================================================================
 
-def plot_waveforms(t, pwm, output, device):
-    fig, ax = plt.subplots(figsize=(13, 5))
+def plot_waveforms(t, pwm, output, mode, device):
 
-    ax.plot(
-        t,
-        pwm,
-        linestyle="--",
-        linewidth=1.2,
-        alpha=0.75,
-        label="PWM Input"
-    )
+    # =========================================================
+    # BOTH ON SAME GRAPH
+    # =========================================================
 
-    ax.plot(
-        t,
-        output,
-        linewidth=2.5,
-        label=f"{device.capitalize()} Output"
-    )
+    if mode == "Both":
 
-    ax.set_title(f"{device.capitalize()} Response to PWM", fontsize=15)
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Amplitude")
-    ax.grid(True, alpha=0.3)
-    ax.legend()
+        fig, ax = plt.subplots(figsize=(13, 5))
 
-    ymin = min(np.min(output), np.min(pwm))
-    ymax = max(np.max(output), np.max(pwm))
-    margin = 0.1 * (ymax - ymin + 1e-6)
+        ax.plot(
+            t,
+            pwm,
+            linestyle="--",
+            linewidth=1.5,
+            alpha=0.7,
+            label="PWM Input"
+        )
 
-    ax.set_ylim(ymin - margin, ymax + margin)
+        ax.plot(
+            t,
+            output,
+            linewidth=2.5,
+            label=f"{device.capitalize()} Output"
+        )
 
-    fig.tight_layout()
-    return fig
+        ax.set_title(
+            f"{device.capitalize()} vs PWM"
+        )
 
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Amplitude")
+
+        ax.grid(True, alpha=0.3)
+
+        ax.legend()
+
+        return fig
+
+    # =========================================================
+    # PWM ONLY
+    # =========================================================
+
+    elif mode == "PWM Only":
+
+        fig, ax = plt.subplots(figsize=(13, 4))
+
+        ax.plot(
+            t,
+            pwm,
+            linestyle="--",
+            linewidth=2,
+            color="blue"
+        )
+
+        ax.set_title("PWM Input Signal")
+
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Voltage")
+
+        ax.grid(True, alpha=0.3)
+
+        return fig
+
+    # =========================================================
+    # DEVICE ONLY
+    # =========================================================
+
+    elif mode == "Device Only":
+
+        fig, ax = plt.subplots(figsize=(13, 4))
+
+        ax.plot(
+            t,
+            output,
+            linewidth=2.5,
+            color="orange"
+        )
+
+        ax.set_title(
+            f"{device.capitalize()} Output"
+        )
+
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Response")
+
+        ax.grid(True, alpha=0.3)
+
+        return fig
+
+    # =========================================================
+    # SEPARATE SUBPLOTS
+    # =========================================================
+
+    elif mode == "Separate Subplots":
+
+        fig, (ax1, ax2) = plt.subplots(
+            2,
+            1,
+            figsize=(13, 7),
+            sharex=True
+        )
+
+        # PWM
+        ax1.plot(
+            t,
+            pwm,
+            linestyle="--",
+            linewidth=1.5
+        )
+
+        ax1.set_title("PWM Input")
+
+        ax1.set_ylabel("Voltage")
+
+        ax1.grid(True, alpha=0.3)
+
+        # DEVICE
+        ax2.plot(
+            t,
+            output,
+            linewidth=2.5
+        )
+
+        ax2.set_title(
+            f"{device.capitalize()} Response"
+        )
+
+        ax2.set_xlabel("Time (s)")
+        ax2.set_ylabel("Output")
+
+        ax2.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+
+        return fig
 
 # =============================================================================
 # SMART INSIGHTS
@@ -544,6 +646,15 @@ device = st.sidebar.selectbox(
         "buzzer"
     ]
 )
+graph_mode = st.sidebar.selectbox(
+    "Advanced Graph View",
+    [
+        "Both",
+        "PWM Only",
+        "Device Only",
+        "Separate Subplots"
+    ]
+)
 
 time_window = st.sidebar.slider(
     "Time Window (s)",
@@ -584,6 +695,7 @@ st.pyplot(
         t,
         pwm,
         output,
+        graph_mode,
         device
     )
 )
