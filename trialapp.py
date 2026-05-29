@@ -208,35 +208,39 @@ def simulate_motor(vin, dt,
     return speed
 
 
-def simulate_heater(vin, dt,
-                     heating_tau=0.08,
-                     cooling_tau=0.25,
-                     ambient=25):
+def simulate_heater(vin, dt):
+
+    # Faster visual thermal response
+    heating_tau = 0.003
+    cooling_tau = 0.006
+
+    ambient = 25.0
+    max_temp = 80.0
 
     temperature = np.zeros_like(vin)
 
-    # Start at room temperature
+    # Start from room temperature
     temperature[0] = ambient
 
     for i in range(1, len(vin)):
 
+        # PWM ON
         if vin[i] > 0:
 
-            # Heater ON → warm up
-            target = ambient + vin[i] * 8
-
+            target = max_temp
             tau = heating_tau
 
+        # PWM OFF
         else:
 
-            # Heater OFF → cool down
             target = ambient
-
             tau = cooling_tau
 
-        temperature[i] = temperature[i - 1] + (
-            target - temperature[i - 1]
-        ) * (dt / tau)
+        # First-order thermal system
+        temperature[i] = (
+            temperature[i - 1]
+            + (target - temperature[i - 1]) * (dt / tau)
+        )
 
     return temperature
 
