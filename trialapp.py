@@ -122,27 +122,42 @@ def simulate_diode(vin, dt, Vf=0.7):
     return np.where(vin > Vf, vin - Vf, 0.0)
 
 
-def simulate_zener(vin, dt, Vz=2.5, tau=0.001):
-    # Clamp with slight dynamic response
-    target = np.where(vin > Vz, Vz, vin)
-    vout = np.zeros_like(vin, dtype=float)
+def simulate_zener(vin, dt, Vz=3.3):
 
-    for i in range(1, len(vin)):
-        vout[i] = vout[i - 1] + (target[i] - vout[i - 1]) * (dt / tau)
+    vout = np.zeros_like(vin)
 
-    return np.clip(vout, 0.0, VMAX)
+    for i in range(len(vin)):
+
+        if vin[i] < 0.7:
+            # no conduction
+            vout[i] = 0
+
+        elif vin[i] < Vz:
+            # normal diode region
+            vout[i] = vin[i] - 0.7
+
+        else:
+            # zener breakdown clamp
+            vout[i] = Vz
+
+    return vout
 
 
-def simulate_transistor(vin, dt, Vth=1.2, gain=3.0, tau=0.00005):
-    # Strong switching behavior so it differs from diode/zener
-    target = np.where(vin > Vth, np.clip(gain * (vin - Vth), 0.0, VMAX), 0.0)
-    vout = np.zeros_like(vin, dtype=float)
+def simulate_transistor(vin, dt, Vth=1.2):
 
-    for i in range(1, len(vin)):
-        vout[i] = vout[i - 1] + (target[i] - vout[i - 1]) * (dt / tau)
+    vout = np.zeros_like(vin)
 
-    return np.clip(vout, 0.0, VMAX)
+    for i in range(len(vin)):
 
+        if vin[i] > Vth:
+            # transistor ON
+            vout[i] = 5.0
+
+        else:
+            # transistor OFF
+            vout[i] = 0.0
+
+    return vout
 
 def simulate_motor(vin, dt):
     # Electrical + mechanical lag
@@ -430,8 +445,9 @@ def generate_insights(device, frequency, duty_cycle, metrics):
             recommendations.append("🔴 Very loud buzzer operation")
 
     final_output = []
-  
     final_output.extend(insights)
+  
+
     return final_output
 
 
