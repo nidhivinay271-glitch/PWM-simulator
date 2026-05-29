@@ -208,47 +208,37 @@ def simulate_motor(vin, dt,
     return speed
 
 
-def simulate_heater(
-    vin,
-    dt,
-    thermal_tau=0.5,
-    cooling=0.02,
-    max_temp=100
-):
+def simulate_heater(vin, dt,
+                     heating_tau=0.08,
+                     cooling_tau=0.25,
+                     ambient=25):
 
     temperature = np.zeros_like(vin)
 
-    ambient = 25.0
-
+    # Start at room temperature
     temperature[0] = ambient
 
     for i in range(1, len(vin)):
 
-        # Convert PWM voltage into heating power
-        power = (vin[i] / 5.0) * max_temp
+        if vin[i] > 0:
 
-        # Heating response
-        heating = (
-            power - (temperature[i - 1] - ambient)
-        ) * (dt / thermal_tau)
+            # Heater ON → warm up
+            target = ambient + vin[i] * 8
 
-        # Cooling effect
-        cooling_term = (
-            temperature[i - 1] - ambient
-        ) * cooling * dt
+            tau = heating_tau
 
-        temperature[i] = (
-            temperature[i - 1]
-            + heating
-            - cooling_term
-        )
+        else:
+
+            # Heater OFF → cool down
+            target = ambient
+
+            tau = cooling_tau
+
+        temperature[i] = temperature[i - 1] + (
+            target - temperature[i - 1]
+        ) * (dt / tau)
 
     return temperature
-
-
-def simulate_buzzer(vin, threshold=2.5):
-
-    return np.where(vin >= threshold, 1.0, 0.0)
 
 
 # =============================================================================
