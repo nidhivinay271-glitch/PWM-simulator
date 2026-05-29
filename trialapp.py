@@ -208,26 +208,47 @@ def simulate_motor(vin, dt,
     return speed
 
 
-def simulate_heater(vin, dt, tau=0.05):
+def simulate_heater(
+    vin,
+    dt,
+    thermal_tau=0.5,
+    cooling=0.02,
+    max_temp=100
+):
 
     temperature = np.zeros_like(vin)
 
+    ambient = 25.0
+
+    temperature[0] = ambient
+
     for i in range(1, len(vin)):
 
-        temperature[i] = temperature[i - 1] + (
-            vin[i] - temperature[i - 1]
-        ) * (dt / tau)
+        # Convert PWM voltage into heating power
+        power = (vin[i] / 5.0) * max_temp
+
+        # Heating response
+        heating = (
+            power - (temperature[i - 1] - ambient)
+        ) * (dt / thermal_tau)
+
+        # Cooling effect
+        cooling_term = (
+            temperature[i - 1] - ambient
+        ) * cooling * dt
+
+        temperature[i] = (
+            temperature[i - 1]
+            + heating
+            - cooling_term
+        )
 
     return temperature
 
 
 def simulate_buzzer(vin, threshold=2.5):
 
-    return np.where(
-        vin > threshold,
-        1.0,
-        0.0
-    )
+    return np.where(vin >= threshold, 1.0, 0.0)
 
 
 # =============================================================================
@@ -265,7 +286,7 @@ def get_device_response(device, vin, dt):
 
     else:
         raise ValueError("Unknown device")
-
+       
 
 # =============================================================================
 # METRICS
@@ -712,6 +733,7 @@ if st.button(
                 ⚙️
             </div>
 
+            
             <p>{int(v*100)} % RPM</p>
 
             </div>
