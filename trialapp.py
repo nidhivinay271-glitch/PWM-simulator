@@ -214,7 +214,7 @@ def simulate_heater(vin, dt):
     heating_tau = 0.003
     cooling_tau = 0.006
 
-    ambient = 25.0
+    ambient = 5.0
     max_temp = 80.0
 
     temperature = np.zeros_like(vin)
