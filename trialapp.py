@@ -1049,38 +1049,443 @@ if st.button("Run Animation", key="run_animation_button"):
 
         time.sleep(0.02)
 # =============================================================================
-# OPTIONAL ADVANCED FEATURES
-# SAFE TO ADD / REMOVE
+# OPTIONAL ADVANCED ENGINEERING FEATURES
+# SAFE TO REMOVE ANYTIME
 # =============================================================================
 
 st.markdown("---")
-st.header("🚀 Advanced Optional Features")
+st.header("🚀 Advanced Engineering Features")
 
 # =============================================================================
-# ENGINEERING DASHBOARD PANEL
+# FEATURE SELECTOR
 # =============================================================================
 
-if enable_dark_panel:
+advanced_feature = st.selectbox(
+    "Select Advanced Feature",
+    [
+        "None",
+        "FFT Analyzer",
+        "Device Theory Panel",
+        "Oscilloscope Theme",
+        "Comparison Mode",
+        "Efficiency Calculator",
+        "Circuit Diagram Panel",
+        "Real Component Sliders"
+    ]
+)
 
-    st.subheader("🖥 Engineering Status Panel")
+# =============================================================================
+# FFT ANALYZER
+# =============================================================================
 
-    st.code(f"""
-SYSTEM STATUS REPORT
----------------------
-DEVICE            : {device.upper()}
-PWM FREQUENCY     : {frequency} Hz
-DUTY CYCLE        : {duty_cycle} %
-TIME WINDOW       : {time_window} s
-MEAN OUTPUT       : {metrics['mean']:.2f}
-RMS OUTPUT        : {metrics['rms']:.2f}
-MAX OUTPUT        : {metrics['max']:.2f}
-MIN OUTPUT        : {metrics['min']:.2f}
+if advanced_feature == "FFT Analyzer":
 
-SYSTEM MODE       : ACTIVE
-PWM ENGINE        : RUNNING
-GRAPH ENGINE      : ONLINE
-AI ASSISTANT      : READY
-""")
+    st.subheader("🎵 FFT Frequency Spectrum")
+
+    fft = np.fft.fft(output)
+    freqs = np.fft.fftfreq(len(output), d=dt)
+
+    positive = freqs > 0
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+
+    ax.plot(
+        freqs[positive],
+        np.abs(fft[positive]),
+        linewidth=1.5
+    )
+
+    ax.set_xlim(0, frequency * 10)
+
+    ax.set_title(
+        f"{device.capitalize()} Frequency Spectrum"
+    )
+
+    ax.set_xlabel("Frequency (Hz)")
+    ax.set_ylabel("Magnitude")
+
+    ax.grid(True, alpha=0.3)
+
+    st.pyplot(fig)
+
+# =============================================================================
+# DEVICE THEORY PANEL
+# =============================================================================
+
+elif advanced_feature == "Device Theory Panel":
+
+    st.subheader("📘 Device Theory")
+
+    theory = {
+
+        "capacitor":
+        """
+        Capacitors oppose sudden voltage change.
+
+        PWM Result:
+        - Smooth charging/discharging curve
+        - Converts PWM into analog-like voltage
+        - Higher frequency = smoother output
+        """,
+
+        "inductor":
+        """
+        Inductors oppose sudden current change.
+
+        PWM Result:
+        - Current ramps gradually
+        - Triangular ripple waveform possible
+        - Used in buck converters and motors
+        """,
+
+        "led":
+        """
+        LEDs respond to average current.
+
+        PWM Result:
+        - Brightness controlled by duty cycle
+        - High PWM frequency removes flicker
+        """,
+
+        "diode":
+        """
+        Diodes conduct only in forward bias.
+
+        PWM Result:
+        - Acts like rectifier
+        - Blocks reverse conduction
+        """,
+
+        "zener":
+        """
+        Zener diode regulates voltage.
+
+        PWM Result:
+        - Output clamps near breakdown voltage
+        - Used for voltage protection
+        """,
+
+        "transistor":
+        """
+        Transistor acts as electronic switch.
+
+        PWM Result:
+        - ON/OFF switching waveform
+        - Used for motor and LED control
+        """,
+
+        "motor":
+        """
+        Motors have inertia.
+
+        PWM Result:
+        - Speed changes gradually
+        - Mechanical lag smooths PWM
+        """,
+
+        "heater":
+        """
+        Heaters have thermal inertia.
+
+        PWM Result:
+        - Temperature changes slowly
+        - PWM controls average heating power
+        """,
+
+        "buzzer":
+        """
+        Buzzers convert PWM into sound.
+
+        PWM Result:
+        - Frequency controls tone
+        - Duty cycle affects loudness
+        """
+    }
+
+    st.info(theory.get(device, "No theory available."))
+
+# =============================================================================
+# OSCILLOSCOPE THEME
+# =============================================================================
+
+elif advanced_feature == "Oscilloscope Theme":
+
+    st.subheader("🖥 Oscilloscope Display")
+
+    fig, ax = plt.subplots(
+        figsize=(12, 5),
+        facecolor="black"
+    )
+
+    ax.set_facecolor("black")
+
+    ax.plot(
+        t,
+        output,
+        linewidth=2,
+        color="lime"
+    )
+
+    ax.plot(
+        t,
+        pwm,
+        linestyle="--",
+        alpha=0.4,
+        color="cyan"
+    )
+
+    ax.set_title(
+        "Oscilloscope View",
+        color="white"
+    )
+
+    ax.set_xlabel(
+        "Time (s)",
+        color="white"
+    )
+
+    ax.set_ylabel(
+        "Amplitude",
+        color="white"
+    )
+
+    ax.tick_params(colors="white")
+
+    ax.grid(True, color="green", alpha=0.2)
+
+    st.pyplot(fig)
+
+# =============================================================================
+# COMPARISON MODE
+# =============================================================================
+
+elif advanced_feature == "Comparison Mode":
+
+    st.subheader("🔬 Duty Cycle Comparison")
+
+    compare_values = [20, 50, 80]
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+
+    for d in compare_values:
+
+        t_cmp, pwm_cmp, dt_cmp = generate_pwm_signal(
+            d,
+            frequency,
+            time_window
+        )
+
+        out_cmp = get_device_response(
+            device,
+            pwm_cmp,
+            dt_cmp
+        )
+
+        ax.plot(
+            t_cmp,
+            out_cmp,
+            linewidth=2,
+            label=f"{d}% Duty"
+        )
+
+    ax.set_title(
+        f"{device.capitalize()} Comparison"
+    )
+
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Output")
+
+    ax.grid(True, alpha=0.3)
+
+    ax.legend()
+
+    st.pyplot(fig)
+
+# =============================================================================
+# EFFICIENCY CALCULATOR
+# =============================================================================
+
+elif advanced_feature == "Efficiency Calculator":
+
+    st.subheader("⚡ Efficiency Calculator")
+
+    avg_voltage = np.mean(output)
+
+    efficiency = (
+        avg_voltage / VMAX
+    ) * 100
+
+    loss = 100 - efficiency
+
+    col1, col2 = st.columns(2)
+
+    col1.metric(
+        "Estimated Efficiency",
+        f"{efficiency:.1f}%"
+    )
+
+    col2.metric(
+        "Estimated Loss",
+        f"{loss:.1f}%"
+    )
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+
+    ax.bar(
+        ["Useful Output", "Loss"],
+        [efficiency, loss]
+    )
+
+    ax.set_ylim(0, 100)
+
+    ax.set_ylabel("Percent")
+
+    ax.set_title("PWM Efficiency")
+
+    st.pyplot(fig)
+
+# =============================================================================
+# CIRCUIT DIAGRAM PANEL
+# =============================================================================
+
+elif advanced_feature == "Circuit Diagram Panel":
+
+    st.subheader("🔌 Basic Circuit Diagram")
+
+    diagrams = {
+
+        "led":
+        """
+PWM Pin ---- Resistor ---- LED ---- GND
+        """,
+
+        "motor":
+        """
+PWM Pin ---- MOSFET ---- Motor ---- Supply
+                     |
+                    Diode
+        """,
+
+        "capacitor":
+        """
+PWM ---- RC Filter ---- Output
+           |
+        Capacitor
+           |
+          GND
+        """,
+
+        "inductor":
+        """
+PWM ---- Inductor ---- Load
+        """,
+
+        "heater":
+        """
+PWM ---- MOSFET ---- Heater
+        """,
+
+        "transistor":
+        """
+PWM ---- Base Resistor ---- Transistor
+        """
+    }
+
+    st.code(
+        diagrams.get(
+            device,
+            "Circuit not available"
+        )
+    )
+
+# =============================================================================
+# REAL COMPONENT SLIDERS
+# =============================================================================
+
+elif advanced_feature == "Real Component Sliders":
+
+    st.subheader("🎛 Real Component Controls")
+
+    if device == "capacitor":
+
+        R = st.slider(
+            "Resistance (Ohm)",
+            100,
+            10000,
+            1000
+        )
+
+        C = st.slider(
+            "Capacitance (uF)",
+            1,
+            1000,
+            100
+        ) * 1e-6
+
+        modified_output = simulate_rc(
+            pwm,
+            dt,
+            R=R,
+            C=C
+        )
+
+    elif device == "inductor":
+
+        R = st.slider(
+            "Resistance (Ohm)",
+            1,
+            20,
+            2
+        )
+
+        L = st.slider(
+            "Inductance (mH)",
+            1,
+            100,
+            5
+        ) * 1e-3
+
+        modified_output = simulate_rl(
+            pwm,
+            dt,
+            R=R,
+            L=L
+        )
+
+    else:
+
+        st.info(
+            "Real component sliders available mainly for RC/RL devices."
+        )
+
+        modified_output = output
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+
+    ax.plot(
+        t,
+        pwm,
+        linestyle="--",
+        alpha=0.5,
+        label="PWM"
+    )
+
+    ax.plot(
+        t,
+        modified_output,
+        linewidth=2.5,
+        label="Modified Output"
+    )
+
+    ax.set_title(
+        "Real Component Simulation"
+    )
+
+    ax.grid(True, alpha=0.3)
+
+    ax.legend()
+
+    st.pyplot(fig)
 
 # =============================================================================
 # END OF OPTIONAL FEATURES
