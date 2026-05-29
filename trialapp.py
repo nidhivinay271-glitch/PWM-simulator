@@ -297,11 +297,13 @@ def get_device_response(device, vin, dt):
 
 def compute_metrics(signal):
 
+    signal = np.array(signal)
+
     return {
-        "Mean": float(np.mean(signal)),
-        "RMS": float(np.sqrt(np.mean(signal ** 2))),
-        "Min": float(np.min(signal)),
-        "Max": float(np.max(signal))
+        "mean": float(np.mean(signal)),
+        "rms": float(np.sqrt(np.mean(signal ** 2))),
+        "min": float(np.min(signal)),
+        "max": float(np.max(signal))
     }
 
 
