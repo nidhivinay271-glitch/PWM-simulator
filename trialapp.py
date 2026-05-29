@@ -787,13 +787,13 @@ col4.metric("Max", f"{metrics['Max']:.2f}")
 # =============================================================================
 
 st.subheader("🧠 Smart Insights")
-
 for insight in generate_insights(
     device,
     frequency,
-    duty_cycle
+    duty_cycle,
+    metrics
 ):
-    st.write("•", insight)
+    st.write(insight)
 
 
 # =============================================================================
