@@ -1048,3 +1048,19 @@ if st.button("Run Animation", key="run_animation_button"):
             placeholder.markdown(html, unsafe_allow_html=True)
 
         time.sleep(0.02)
+from advanced_features import run_advanced_features
+
+run_advanced_features(
+    t,
+    pwm,
+    output,
+    dt,
+    device,
+    frequency,
+    duty_cycle,
+    time_window,
+    metrics,
+    VMAX,
+    generate_pwm_signal,
+    get_device_response
+)
