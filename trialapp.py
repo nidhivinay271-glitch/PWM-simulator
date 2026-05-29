@@ -791,8 +791,8 @@ graph_mode = st.sidebar.selectbox(
 time_window = st.sidebar.slider(
     "Time Window (s)",
     0.05,
-    5.0,
     2.0,
+    0.1,
     step=0.05
 )
 pin = st.sidebar.selectbox(
