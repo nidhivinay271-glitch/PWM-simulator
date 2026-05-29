@@ -233,6 +233,26 @@ def simulate_heater(vin, dt):
 
     return heater
 
+def simulate_buzzer(vin, dt, threshold=2.5):
+
+    # Digital buzzer behavior
+    tone = np.where(
+        vin > threshold,
+        1.0,
+        0.0
+    )
+
+    # Add slight ringing effect
+    out = np.zeros_like(vin)
+
+    for i in range(1, len(vin)):
+
+        out[i] = out[i - 1] + (
+            tone[i] - out[i - 1]
+        ) * 0.4
+
+    return out
+
 
 # =============================================================================
 # DEVICE RESPONSE ROUTER
@@ -265,7 +285,7 @@ def get_device_response(device, vin, dt):
         return simulate_heater(vin, dt)
 
     elif device == "buzzer":
-        return simulate_buzzer(vin)
+        return simulate_buzzer(vin, dt)
 
     else:
         raise ValueError("Unknown device")
