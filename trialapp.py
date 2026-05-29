@@ -387,35 +387,213 @@ def plot_waveforms(t, pwm, output):
 # SMART INSIGHTS
 # =============================================================================
 
-def generate_insights(device, frequency, duty_cycle):
+def generate_insights(device, frequency, duty_cycle, metrics):
 
     insights = []
+    recommendations = []
 
-    if duty_cycle < 10:
-        insights.append("Very low duty cycle.")
+    # =========================================================
+    # DUTY CYCLE STATUS
+    # =========================================================
 
-    elif duty_cycle > 90:
-        insights.append("Near DC operation.")
+    if duty_cycle < 30:
+        level = "🟢 LOW"
+    elif duty_cycle < 70:
+        level = "🟡 MEDIUM"
+    else:
+        level = "🔴 HIGH"
 
-    if frequency < 50:
-        insights.append("Low frequency may cause ripple/flicker.")
+    insights.append(f"Duty Cycle Level: {level}")
+    insights.append(f"Operating Frequency: {frequency} Hz")
 
-    elif frequency > 10000:
-        insights.append("High frequency gives smoother response.")
+    # =========================================================
+    # DEVICE SPECIFIC INSIGHTS
+    # =========================================================
 
-    if device == "capacitor":
-        insights.append("Capacitor smooths PWM waveform.")
+    if device == "led":
 
-    elif device == "inductor":
-        insights.append("Inductor current ramps gradually.")
+        brightness = duty_cycle
+
+        insights.append(
+            f"LED Brightness ≈ {brightness:.0f}%"
+        )
+
+        if duty_cycle < 20:
+            recommendations.append("🟢 Dim LED operation")
+        elif duty_cycle < 80:
+            recommendations.append("🟡 Normal brightness")
+        else:
+            recommendations.append("🔴 Very high brightness → heating possible")
+
+        if frequency < 100:
+            recommendations.append("🔴 Visible LED flicker likely")
+        else:
+            recommendations.append("🟢 Smooth LED brightness")
+
+    # =========================================================
 
     elif device == "motor":
-        insights.append("Motor inertia smooths speed changes.")
+
+        speed = duty_cycle
+
+        insights.append(
+            f"Estimated Motor Speed ≈ {speed:.0f}%"
+        )
+
+        if duty_cycle < 25:
+            recommendations.append("🟢 Low speed operation")
+        elif duty_cycle < 75:
+            recommendations.append("🟡 Moderate motor speed")
+        else:
+            recommendations.append("🔴 High speed → increased current draw")
+
+        if frequency < 50:
+            recommendations.append("🔴 Motor may jerk or vibrate")
+        else:
+            recommendations.append("🟢 Smooth motor rotation expected")
+
+    # =========================================================
 
     elif device == "heater":
-        insights.append("Thermal inertia causes slow response.")
 
-    return insights
+        heat = duty_cycle
+
+        insights.append(
+            f"Estimated Heating Power ≈ {heat:.0f}%"
+        )
+
+        if duty_cycle < 30:
+            recommendations.append("🟢 Low heating")
+        elif duty_cycle < 70:
+            recommendations.append("🟡 Moderate heating")
+        else:
+            recommendations.append("🔴 High temperature operation")
+
+        recommendations.append(
+            "🟡 Heater response is slow due to thermal inertia"
+        )
+
+    # =========================================================
+
+    elif device == "capacitor":
+
+        insights.append(
+            "Capacitor smooths PWM into analog-like voltage"
+        )
+
+        if frequency < 100:
+            recommendations.append("🔴 Ripple voltage may be high")
+        elif frequency < 1000:
+            recommendations.append("🟡 Moderate filtering")
+        else:
+            recommendations.append("🟢 Strong smoothing effect")
+
+    # =========================================================
+
+    elif device == "inductor":
+
+        insights.append(
+            "Inductor resists sudden current changes"
+        )
+
+        if frequency < 100:
+            recommendations.append("🔴 Current ripple may be large")
+        elif frequency < 1000:
+            recommendations.append("🟡 Moderate ripple current")
+        else:
+            recommendations.append("🟢 Smooth inductor current")
+
+    # =========================================================
+
+    elif device == "diode":
+
+        insights.append(
+            "Diode allows one-direction current flow"
+        )
+
+        if duty_cycle < 20:
+            recommendations.append("🟢 Low conduction interval")
+        elif duty_cycle < 80:
+            recommendations.append("🟡 Normal rectification")
+        else:
+            recommendations.append("🔴 High average diode current")
+
+    # =========================================================
+
+    elif device == "zener":
+
+        insights.append(
+            "Zener regulates voltage near breakdown level"
+        )
+
+        if duty_cycle < 30:
+            recommendations.append("🟢 Light regulation load")
+        elif duty_cycle < 70:
+            recommendations.append("🟡 Stable regulation")
+        else:
+            recommendations.append("🔴 High zener power dissipation")
+
+    # =========================================================
+
+    elif device == "transistor":
+
+        insights.append(
+            "Transistor operates as PWM electronic switch"
+        )
+
+        if duty_cycle < 20:
+            recommendations.append("🟢 Low switching activity")
+        elif duty_cycle < 80:
+            recommendations.append("🟡 Efficient switching region")
+        else:
+            recommendations.append("🔴 High conduction time → heating possible")
+
+        if frequency > 10000:
+            recommendations.append("🟡 Switching losses may increase")
+
+    # =========================================================
+
+    elif device == "buzzer":
+
+        insights.append(
+            "Buzzer converts PWM into audible sound"
+        )
+
+        if frequency < 100:
+            recommendations.append("🔴 Clicking sound likely")
+        elif frequency < 5000:
+            recommendations.append("🟢 Audible tone region")
+        else:
+            recommendations.append("🟡 Frequency may exceed hearing range")
+
+        if duty_cycle < 20:
+            recommendations.append("🟢 Low sound intensity")
+        elif duty_cycle < 80:
+            recommendations.append("🟡 Moderate sound level")
+        else:
+            recommendations.append("🔴 Very loud buzzer operation")
+
+    # =========================================================
+    # COMMON METRICS
+    # =========================================================
+
+    insights.append(f"Mean Output: {metrics['mean']:.2f}")
+    insights.append(f"RMS Output: {metrics['rms']:.2f}")
+
+    # =========================================================
+    # FINAL FORMAT
+    # =========================================================
+
+    final_output = []
+
+    final_output.append("📊 SMART INSIGHTS")
+    final_output.extend(insights)
+
+    final_output.append("")
+    final_output.append("⚡ RECOMMENDATIONS")
+    final_output.extend(recommendations)
+
+    return final_output
 
 
 # =============================================================================
