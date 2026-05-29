@@ -241,7 +241,7 @@ def simulate_transistor(vin, dt, Vth=1.2):
 
 def simulate_motor(vin, dt):
 
-    electrical_tau = 0.005
+    electrical_tau = 0.05
     mechanical_tau = 0.08
 
     current = np.zeros_like(vin)
