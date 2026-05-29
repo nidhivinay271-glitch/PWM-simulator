@@ -37,7 +37,7 @@ except Exception:
 VMAX = 5.0
 DEFAULT_FREQUENCY = 1000
 DEFAULT_DUTY_CYCLE = 50
-DEFAULT_TIME_WINDOW = 0.02
+DEFAULT_TIME_WINDOW = 2.0
 
 
 # =============================================================================
@@ -175,9 +175,28 @@ def simulate_motor(vin, dt):
 
 
 def simulate_heater(vin, dt):
-    # Thermal low-pass response on a 0..5 scale for clean plotting
-    thermal_tau = 0.08
-    return first_order_system(vin, dt, thermal_tau)
+
+    heater = np.zeros_like(vin)
+
+    ambient = 25.0
+
+    heater[0] = ambient
+
+    thermal_tau = 0.5
+
+    max_temp = 250
+
+    for i in range(1, len(vin)):
+
+        power = vin[i] / VMAX
+
+        target_temp = ambient + power * (max_temp - ambient)
+
+        heater[i] = heater[i - 1] + (
+            target_temp - heater[i - 1]
+        ) * (dt / thermal_tau)
+
+    return heater
 
 
 def simulate_buzzer(vin, dt, threshold=2.5):
