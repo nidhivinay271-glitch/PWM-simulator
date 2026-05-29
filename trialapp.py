@@ -210,39 +210,28 @@ def simulate_motor(vin, dt,
 
 def simulate_heater(vin, dt):
 
-    ambient = 25.0
+    heater = np.zeros_like(vin)
 
-    thermal_mass = 0.02
-    cooling_factor = 0.15
-
-    heater_gain = 12.0
-
-    temperature = np.zeros_like(vin)
-
-    temperature[0] = ambient
+    alpha_heat = 0.03
+    alpha_cool = 0.01
 
     for i in range(1, len(vin)):
 
-        # Heating power from PWM
-        heating = (
-            vin[i] / 5.0
-        ) * heater_gain
+        if vin[i] > 0:
 
-        # Cooling toward ambient
-        cooling = (
-            temperature[i - 1] - ambient
-        ) * cooling_factor
+            # Heat rises slowly
+            heater[i] = heater[i - 1] + (
+                80 - heater[i - 1]
+            ) * alpha_heat
 
-        # Thermal differential equation
-        dT = (
-            heating - cooling
-        ) * dt / thermal_mass
+        else:
 
-        temperature[i] = (
-            temperature[i - 1] + dT
-        )
+            # Cool slowly
+            heater[i] = heater[i - 1] - (
+                heater[i - 1] - 25
+            ) * alpha_cool
 
-    return temperature
+    return heater
 
 
 # =============================================================================
