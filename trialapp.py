@@ -37,7 +37,7 @@ except Exception:
 VMAX = 5.0
 DEFAULT_FREQUENCY = 1000
 DEFAULT_DUTY_CYCLE = 50
-DEFAULT_TIME_WINDOW = 0.05
+DEFAULT_TIME_WINDOW = 0.5
 
 
 # =============================================================================
@@ -790,10 +790,10 @@ graph_mode = st.sidebar.selectbox(
 
 time_window = st.sidebar.slider(
     "Time Window (s)",
-    0.001,
+    0.05,
     5.0,
-    DEFAULT_TIME_WINDOW,
-    step=0.1
+    2.0,
+    step=0.05
 )
 pin = st.sidebar.selectbox(
     "PWM Pin",
