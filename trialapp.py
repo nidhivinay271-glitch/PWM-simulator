@@ -430,7 +430,7 @@ def generate_insights(device, frequency, duty_cycle, metrics):
             recommendations.append("🔴 Very loud buzzer operation")
 
     final_output = []
-    final_output.append("📊 SMART INSIGHTS")
+  
     final_output.extend(insights)
     return final_output
 
